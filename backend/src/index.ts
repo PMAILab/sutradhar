@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import { env } from "./config/env.js";
 import { whatsappWebhookRouter } from "./routes/whatsappWebhook.js";
+import { intakeRouter } from "./routes/intake.js";
+import { copilotRouter } from "./routes/copilot.js";
 
 const app = express();
 
@@ -13,6 +15,8 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/webhooks/whatsapp", whatsappWebhookRouter);
+app.use("/api/intake", intakeRouter);
+app.use("/api/copilot", copilotRouter);
 
 app.listen(env.port, () => {
   console.log(`Sutradhar backend listening on port ${env.port}`);
