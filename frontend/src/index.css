@@ -58,12 +58,13 @@
   --font-serif: "Literata", "Georgia", serif;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 
-  /* Spacing */
+  /* Spacing, names match Stitch's original tokens exactly (underscores),
+     so class strings copied from Stitch HTML resolve without translation */
   --spacing-gutter: 24px;
-  --spacing-margin-desktop: 40px;
-  --spacing-margin-mobile: 16px;
-  --spacing-sidebar-width: 280px;
-  --spacing-container-max: 1440px;
+  --spacing-margin_desktop: 40px;
+  --spacing-margin_mobile: 16px;
+  --spacing-sidebar_width: 280px;
+  --spacing-container_max: 1440px;
 
   /* Radius, Stitch designs use small, sharp radii, not rounded SaaS defaults */
   --radius-DEFAULT: 0.125rem;
