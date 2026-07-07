@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { env } from "./config/env.js";
+import { whatsappWebhookRouter } from "./routes/whatsappWebhook.js";
 
 const app = express();
 
@@ -10,6 +11,8 @@ app.use(express.json());
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "sutradhar-backend" });
 });
+
+app.use("/webhooks/whatsapp", whatsappWebhookRouter);
 
 app.listen(env.port, () => {
   console.log(`Sutradhar backend listening on port ${env.port}`);
