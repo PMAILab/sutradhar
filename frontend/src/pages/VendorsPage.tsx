@@ -1,15 +1,17 @@
 import { Fragment, useEffect, useState } from "react";
+import { useSearchParams, Link } from "react-router-dom";
 import {
   listVendors,
   addVendor,
   getVendorMessages,
   getMessageTemplates,
   sendVendorMessage,
+  listEvents,
   type Vendor,
   type VendorMessage,
   type MessageTemplateDef,
+  type EventSummary,
 } from "../lib/api";
-import { usePlan } from "../context/PlanContext";
 import { VendorStatusPill } from "../components/StatusPill";
 
 type ListState =
@@ -18,29 +20,38 @@ type ListState =
   | { status: "loaded"; vendors: Vendor[] };
 
 export function VendorsPage() {
-  const { plan } = usePlan();
+  const [searchParams] = useSearchParams();
+  const filterEventId = searchParams.get("eventId") ?? undefined;
+
   const [listState, setListState] = useState<ListState>({ status: "loading" });
+  const [events, setEvents] = useState<EventSummary[]>([]);
   const [templates, setTemplates] = useState<Record<string, MessageTemplateDef>>({});
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newVendor, setNewVendor] = useState({ name: "", role: "", phoneNumber: "" });
+  const [newVendor, setNewVendor] = useState({ eventId: filterEventId ?? "", name: "", role: "", phoneNumber: "" });
   const [expandedVendorId, setExpandedVendorId] = useState<string | null>(null);
   const [historyByVendor, setHistoryByVendor] = useState<Record<string, VendorMessage[]>>({});
   const [sendPanelVendorId, setSendPanelVendorId] = useState<string | null>(null);
 
   useEffect(() => {
     loadVendors();
+    listEvents()
+      .then((res) => setEvents(res.events))
+      .catch(() => {
+        // Event names are only needed for display and the send form's defaults.
+      });
     getMessageTemplates()
       .then((res) => setTemplates(res.templates))
       .catch(() => {
         // Template list is only needed to build the send form, fails silently here,
         // the send form itself will show an error if templates never loaded.
       });
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterEventId]);
 
   async function loadVendors() {
     setListState({ status: "loading" });
     try {
-      const { vendors } = await listVendors();
+      const { vendors } = await listVendors(filterEventId);
       setListState({ status: "loaded", vendors });
     } catch (error) {
       setListState({
@@ -51,9 +62,9 @@ export function VendorsPage() {
   }
 
   async function handleAddVendor() {
-    if (!newVendor.name || !newVendor.role || !newVendor.phoneNumber) return;
+    if (!newVendor.eventId || !newVendor.name || !newVendor.role || !newVendor.phoneNumber) return;
     await addVendor(newVendor);
-    setNewVendor({ name: "", role: "", phoneNumber: "" });
+    setNewVendor({ eventId: filterEventId ?? "", name: "", role: "", phoneNumber: "" });
     setShowAddForm(false);
     loadVendors();
   }
@@ -70,6 +81,13 @@ export function VendorsPage() {
     }
   }
 
+  function eventLabel(eventId: string): string {
+    const event = events.find((e) => e.id === eventId);
+    return event?.coupleNames ?? "Unknown wedding";
+  }
+
+  const filteredEvent = filterEventId ? events.find((e) => e.id === filterEventId) : undefined;
+
   return (
     <div className="flex-1 p-margin_desktop overflow-y-auto">
       <div className="flex justify-between items-center mb-8">
@@ -77,7 +95,13 @@ export function VendorsPage() {
           <h2 className="font-serif text-headline-lg text-primary">Vendors</h2>
           <p className="font-sans text-body-sm text-on-surface-variant">
             Confirmations, payment reminders, and plan updates over WhatsApp.
+            {filteredEvent && ` Showing ${filteredEvent.coupleNames ?? "this wedding"} only.`}
           </p>
+          {filterEventId && (
+            <Link to="/vendors" className="font-sans text-label-sm text-primary underline">
+              Show all weddings
+            </Link>
+          )}
         </div>
         <button
           onClick={() => setShowAddForm((v) => !v)}
@@ -88,8 +112,23 @@ export function VendorsPage() {
       </div>
 
       {showAddForm && (
-        <div className="bg-surface-container-low border border-outline-variant rounded-lg p-6 mb-8 flex gap-4 items-end">
-          <div className="flex-1">
+        <div className="bg-surface-container-low border border-outline-variant rounded-lg p-6 mb-8 flex gap-4 items-end flex-wrap">
+          <div className="flex-1 min-w-[180px]">
+            <label className="block font-sans text-label-sm text-on-surface-variant uppercase mb-1">Wedding</label>
+            <select
+              className="w-full px-3 py-2 bg-surface-container-lowest border border-outline-variant rounded"
+              value={newVendor.eventId}
+              onChange={(e) => setNewVendor((v) => ({ ...v, eventId: e.target.value }))}
+            >
+              <option value="">Select a wedding</option>
+              {events.map((event) => (
+                <option key={event.id} value={event.id}>
+                  {event.coupleNames ?? "Untitled wedding"}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex-1 min-w-[160px]">
             <label className="block font-sans text-label-sm text-on-surface-variant uppercase mb-1">Name</label>
             <input
               className="w-full px-3 py-2 bg-surface-container-lowest border border-outline-variant rounded"
@@ -97,7 +136,7 @@ export function VendorsPage() {
               onChange={(e) => setNewVendor((v) => ({ ...v, name: e.target.value }))}
             />
           </div>
-          <div className="flex-1">
+          <div className="flex-1 min-w-[160px]">
             <label className="block font-sans text-label-sm text-on-surface-variant uppercase mb-1">Role</label>
             <input
               className="w-full px-3 py-2 bg-surface-container-lowest border border-outline-variant rounded"
@@ -106,7 +145,7 @@ export function VendorsPage() {
               onChange={(e) => setNewVendor((v) => ({ ...v, role: e.target.value }))}
             />
           </div>
-          <div className="flex-1">
+          <div className="flex-1 min-w-[160px]">
             <label className="block font-sans text-label-sm text-on-surface-variant uppercase mb-1">
               WhatsApp number
             </label>
@@ -161,6 +200,11 @@ export function VendorsPage() {
                 <th className="px-gutter py-4 font-sans text-label-sm text-on-surface-variant uppercase tracking-widest">
                   Role
                 </th>
+                {!filterEventId && (
+                  <th className="px-gutter py-4 font-sans text-label-sm text-on-surface-variant uppercase tracking-widest">
+                    Wedding
+                  </th>
+                )}
                 <th className="px-gutter py-4 font-sans text-label-sm text-on-surface-variant uppercase tracking-widest">
                   WhatsApp status
                 </th>
@@ -175,6 +219,11 @@ export function VendorsPage() {
                   <tr className="hover:bg-surface-container-lowest transition-colors">
                     <td className="px-gutter py-5 font-sans text-body-md font-medium">{vendor.name}</td>
                     <td className="px-gutter py-5 font-sans text-body-sm text-on-surface-variant">{vendor.role}</td>
+                    {!filterEventId && (
+                      <td className="px-gutter py-5 font-sans text-body-sm text-on-surface-variant">
+                        {eventLabel(vendor.eventId)}
+                      </td>
+                    )}
                     <td className="px-gutter py-5">
                       <VendorStatusPill status={vendor.status} />
                     </td>
@@ -195,11 +244,11 @@ export function VendorsPage() {
                   </tr>
                   {sendPanelVendorId === vendor.id && (
                     <tr className="bg-surface-container-low/50">
-                      <td colSpan={4} className="p-6">
+                      <td colSpan={filterEventId ? 4 : 5} className="p-6">
                         <VendorSendForm
                           vendor={vendor}
                           templates={templates}
-                          plan={plan}
+                          event={events.find((e) => e.id === vendor.eventId)}
                           onSent={() => {
                             setSendPanelVendorId(null);
                             loadVendors();
@@ -210,7 +259,7 @@ export function VendorsPage() {
                   )}
                   {expandedVendorId === vendor.id && (
                     <tr className="bg-surface-container-low/50">
-                      <td colSpan={4} className="p-6">
+                      <td colSpan={filterEventId ? 4 : 5} className="p-6">
                         <MessageHistory messages={historyByVendor[vendor.id] ?? []} />
                       </td>
                     </tr>
@@ -254,12 +303,12 @@ function MessageHistory({ messages }: { messages: VendorMessage[] }) {
 function VendorSendForm({
   vendor,
   templates,
-  plan,
+  event,
   onSent,
 }: {
   vendor: Vendor;
   templates: Record<string, MessageTemplateDef>;
-  plan: { coupleNames: string | null; weddingDate: string | null } | null;
+  event?: EventSummary;
   onSent: () => void;
 }) {
   const templateNames = Object.keys(templates);
@@ -277,8 +326,8 @@ function VendorSendForm({
   function defaultParams(labels: string[]): string[] {
     return labels.map((label) => {
       if (label.toLowerCase().includes("vendor name")) return vendor.name;
-      if (label.toLowerCase().includes("couple")) return plan?.coupleNames ?? "";
-      if (label.toLowerCase().includes("date")) return plan?.weddingDate ?? "";
+      if (label.toLowerCase().includes("couple")) return event?.coupleNames ?? "";
+      if (label.toLowerCase().includes("date")) return event?.weddingDate ?? "";
       return "";
     });
   }

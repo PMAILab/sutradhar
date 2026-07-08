@@ -5,6 +5,7 @@
 
 export interface Vendor {
   id: string;
+  eventId: string;
   name: string;
   role: string;
   phoneNumber: string; // E.164 without the leading +, matches Meta's "to" format
@@ -32,10 +33,11 @@ export const messages: Message[] = [];
 let vendorCounter = 0;
 let messageCounter = 0;
 
-export function addVendor(input: { name: string; role: string; phoneNumber: string }): Vendor {
+export function addVendor(input: { eventId: string; name: string; role: string; phoneNumber: string }): Vendor {
   vendorCounter += 1;
   const vendor: Vendor = {
     id: `vendor_${vendorCounter}`,
+    eventId: input.eventId,
     name: input.name,
     role: input.role,
     phoneNumber: input.phoneNumber.replace(/[^0-9]/g, ""),
@@ -47,6 +49,10 @@ export function addVendor(input: { name: string; role: string; phoneNumber: stri
 
 export function getVendorById(id: string): Vendor | undefined {
   return vendors.find((v) => v.id === id);
+}
+
+export function getVendorsForEvent(eventId: string): Vendor[] {
+  return vendors.filter((v) => v.eventId === eventId);
 }
 
 export function findVendorByPhone(phoneNumber: string): Vendor | undefined {

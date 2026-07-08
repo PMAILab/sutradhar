@@ -24,6 +24,26 @@ export interface StructuredPlan {
   ceremonies: PlanCeremony[];
 }
 
+export interface WeddingEvent extends StructuredPlan {
+  id: string;
+  createdAt: string;
+  dismissedGapIds: string[];
+  lastGapCount: number;
+  completedAt: string | null;
+  successful: boolean | null;
+}
+
+export interface EventSummary {
+  id: string;
+  coupleNames: string | null;
+  weddingDate: string | null;
+  tradition: Tradition | "unspecified";
+  progress: { confirmed: number; total: number };
+  vendorSummary: { total: number; confirmed: number; needsAttention: number };
+  lastGapCount: number;
+  successful?: boolean | null;
+}
+
 export interface Gap {
   id: string;
   ceremonyId: string;
@@ -50,21 +70,76 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function parseIntake(rawText: string): Promise<{ plan: StructuredPlan }> {
+export function parseIntake(rawText: string): Promise<{ event: WeddingEvent }> {
   return request("/api/intake/parse", {
     method: "POST",
     body: JSON.stringify({ rawText }),
   });
 }
 
-export function checkGaps(
-  plan: StructuredPlan,
-  dismissedGapIds: string[],
-): Promise<{ gaps: Gap[]; note?: string }> {
+export function listEvents(): Promise<{ events: EventSummary[] }> {
+  return request("/api/events");
+}
+
+export function getEvent(eventId: string): Promise<{ event: WeddingEvent }> {
+  return request(`/api/events/${eventId}`);
+}
+
+export function addTaskToCeremony(
+  eventId: string,
+  ceremonyId: string,
+  title: string,
+): Promise<{ event: WeddingEvent }> {
+  return request(`/api/events/${eventId}/tasks`, {
+    method: "POST",
+    body: JSON.stringify({ ceremonyId, title }),
+  });
+}
+
+export function updateTaskStatus(
+  eventId: string,
+  taskId: string,
+  ceremonyId: string,
+  status: PlanTask["status"],
+): Promise<{ event: WeddingEvent }> {
+  return request(`/api/events/${eventId}/tasks/${taskId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ ceremonyId, status }),
+  });
+}
+
+export function dismissGapApi(eventId: string, gapId: string): Promise<{ event: WeddingEvent }> {
+  return request(`/api/events/${eventId}/dismiss-gap`, {
+    method: "POST",
+    body: JSON.stringify({ gapId }),
+  });
+}
+
+export function markEventSuccessful(eventId: string, successful: boolean): Promise<{ event: WeddingEvent }> {
+  return request(`/api/events/${eventId}/mark-successful`, {
+    method: "POST",
+    body: JSON.stringify({ successful }),
+  });
+}
+
+export function checkGaps(eventId: string): Promise<{ gaps: Gap[]; note?: string }> {
   return request("/api/copilot/check-gaps", {
     method: "POST",
-    body: JSON.stringify({ plan, dismissedGapIds }),
+    body: JSON.stringify({ eventId }),
   });
+}
+
+export interface DashboardUrgentItem {
+  id: string;
+  eventId: string;
+  coupleNames: string;
+  category: string;
+  label: string;
+  tier: 1 | 2 | 3;
+}
+
+export function getDashboard(): Promise<{ urgentItems: DashboardUrgentItem[]; events: EventSummary[] }> {
+  return request("/api/dashboard");
 }
 
 export type VendorStatus = "not_contacted" | "sent" | "confirmed" | "declined" | "needs_review" | "needs_attention";
@@ -82,6 +157,7 @@ export interface VendorMessage {
 
 export interface Vendor {
   id: string;
+  eventId: string;
   name: string;
   role: string;
   phoneNumber: string;
@@ -96,11 +172,17 @@ export interface MessageTemplateDef {
   paramLabels: string[];
 }
 
-export function listVendors(): Promise<{ vendors: Vendor[] }> {
-  return request("/api/vendors");
+export function listVendors(eventId?: string): Promise<{ vendors: Vendor[] }> {
+  const query = eventId ? `?eventId=${encodeURIComponent(eventId)}` : "";
+  return request(`/api/vendors${query}`);
 }
 
-export function addVendor(input: { name: string; role: string; phoneNumber: string }): Promise<{ vendor: Vendor }> {
+export function addVendor(input: {
+  eventId: string;
+  name: string;
+  role: string;
+  phoneNumber: string;
+}): Promise<{ vendor: Vendor }> {
   return request("/api/vendors", { method: "POST", body: JSON.stringify(input) });
 }
 

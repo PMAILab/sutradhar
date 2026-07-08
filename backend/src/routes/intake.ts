@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { generateJson } from "../lib/gemini.js";
 import { trackEvent } from "../lib/analytics.js";
+import { addEvent } from "../data/eventsStore.js";
 import type { StructuredPlan } from "../types/plan.js";
 
 export const intakeRouter = Router();
@@ -102,7 +103,9 @@ intakeRouter.post("/parse", async (req, res) => {
       ceremonyCount: structuredPlan.ceremonies.length,
     });
 
-    res.json({ plan: structuredPlan });
+    const event = addEvent(structuredPlan);
+
+    res.json({ event });
   } catch (error) {
     console.error("Intake parse failed:", error);
     res.status(502).json({ error: "Could not read that brief right now, try again in a moment." });

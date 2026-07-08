@@ -1,7 +1,16 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { usePlan } from "../context/PlanContext";
-import { checkGaps, trackAnalyticsEvent, type Gap } from "../lib/api";
+import { useNavigate, useParams, Link } from "react-router-dom";
+import {
+  checkGaps,
+  trackAnalyticsEvent,
+  getEvent,
+  addTaskToCeremony,
+  updateTaskStatus,
+  dismissGapApi,
+  markEventSuccessful,
+  type Gap,
+  type WeddingEvent,
+} from "../lib/api";
 import { StatusPill } from "../components/StatusPill";
 
 type GapsState =
@@ -9,34 +18,47 @@ type GapsState =
   | { status: "error"; message: string }
   | { status: "loaded"; gaps: Gap[]; note?: string };
 
-export function PlanPage() {
-  const { plan, dismissedGapIds, dismissGap, updateCeremonyTasks, addTaskToCeremony } = usePlan();
+type EventState =
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "loaded"; event: WeddingEvent };
+
+export function EventPage() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [activeCeremonyId, setActiveCeremonyId] = useState<string | null>(plan?.ceremonies[0]?.id ?? null);
+  const [eventState, setEventState] = useState<EventState>({ status: "loading" });
+  const [activeCeremonyId, setActiveCeremonyId] = useState<string | null>(null);
   const [gapsState, setGapsState] = useState<GapsState>({ status: "loading" });
   const [newTaskTitle, setNewTaskTitle] = useState("");
 
   useEffect(() => {
-    if (!plan) {
-      navigate("/intake");
-      return;
-    }
-    if (!activeCeremonyId) {
-      setActiveCeremonyId(plan.ceremonies[0]?.id ?? null);
-    }
-  }, [plan, activeCeremonyId, navigate]);
+    if (id) loadEvent(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
 
   useEffect(() => {
-    if (!plan) return;
-    loadGaps();
+    if (eventState.status === "loaded") loadGaps(eventState.event.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan, dismissedGapIds]);
+  }, [eventState.status === "loaded" ? eventState.event.id : null, eventState.status === "loaded" ? eventState.event.dismissedGapIds.length : 0]);
 
-  async function loadGaps() {
-    if (!plan) return;
+  async function loadEvent(eventId: string) {
+    setEventState({ status: "loading" });
+    try {
+      const { event } = await getEvent(eventId);
+      setEventState({ status: "loaded", event });
+      setActiveCeremonyId((prev) => prev ?? event.ceremonies[0]?.id ?? null);
+    } catch (error) {
+      setEventState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Could not load this wedding right now.",
+      });
+    }
+  }
+
+  async function loadGaps(eventId: string) {
     setGapsState({ status: "loading" });
     try {
-      const result = await checkGaps(plan, dismissedGapIds);
+      const result = await checkGaps(eventId);
       setGapsState({ status: "loaded", gaps: result.gaps, note: result.note });
     } catch (error) {
       setGapsState({
@@ -46,43 +68,99 @@ export function PlanPage() {
     }
   }
 
-  if (!plan) return null;
+  if (eventState.status === "loading") {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="h-20 w-64 bg-surface-container-low rounded animate-pulse" />
+      </div>
+    );
+  }
 
-  const activeCeremony = plan.ceremonies.find((c) => c.id === activeCeremonyId) ?? plan.ceremonies[0];
+  if (eventState.status === "error") {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center gap-4">
+        <p className="font-sans text-body-md text-tertiary">{eventState.message}</p>
+        <button onClick={() => navigate("/dashboard")} className="font-sans text-label-lg text-primary underline">
+          Back to dashboard
+        </button>
+      </div>
+    );
+  }
 
-  function handleAddTask() {
+  const event = eventState.event;
+  const activeCeremony = event.ceremonies.find((c) => c.id === activeCeremonyId) ?? event.ceremonies[0];
+
+  const daysUntilWedding = event.weddingDate
+    ? Math.ceil((new Date(event.weddingDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : null;
+
+  async function handleAddTask() {
     if (!activeCeremony || newTaskTitle.trim().length === 0) return;
-    addTaskToCeremony(activeCeremony.id, newTaskTitle.trim());
+    const { event: updated } = await addTaskToCeremony(event.id, activeCeremony.id, newTaskTitle.trim());
+    setEventState({ status: "loaded", event: updated });
     setNewTaskTitle("");
   }
 
-  function handleAddGapToPlan(gap: Gap) {
-    addTaskToCeremony(gap.ceremonyId, gap.label);
-    dismissGap(gap.id);
+  async function handleToggleTaskStatus(ceremonyId: string, taskId: string, currentStatus: string) {
+    const nextStatus = currentStatus === "confirmed" ? "pending" : "confirmed";
+    const { event: updated } = await updateTaskStatus(event.id, taskId, ceremonyId, nextStatus as "pending" | "confirmed");
+    setEventState({ status: "loaded", event: updated });
+  }
+
+  async function handleAddGapToPlan(gap: Gap) {
+    await addTaskToCeremony(event.id, gap.ceremonyId, gap.label);
+    const { event: updated } = await dismissGapApi(event.id, gap.id);
+    setEventState({ status: "loaded", event: updated });
     trackAnalyticsEvent("gap_confirmed", { gapId: gap.id, ceremonyName: gap.ceremonyName });
   }
 
-  function handleDismissGap(gap: Gap) {
-    dismissGap(gap.id);
+  async function handleDismissGap(gap: Gap) {
+    const { event: updated } = await dismissGapApi(event.id, gap.id);
+    setEventState({ status: "loaded", event: updated });
     trackAnalyticsEvent("gap_dismissed", { gapId: gap.id, ceremonyName: gap.ceremonyName });
+  }
+
+  async function handleMarkSuccessful() {
+    const { event: updated } = await markEventSuccessful(event.id, true);
+    setEventState({ status: "loaded", event: updated });
   }
 
   return (
     <div className="flex-1 flex overflow-hidden">
       {/* Plan canvas */}
       <div className="flex-1 p-margin_desktop overflow-y-auto">
-        <div className="mb-6">
-          <h2 className="font-serif text-headline-sm text-primary">
-            {plan.coupleNames ?? "Untitled wedding"}
-          </h2>
-          {plan.weddingDate && (
-            <p className="font-sans text-body-sm text-on-surface-variant">{plan.weddingDate}</p>
+        <div className="flex justify-between items-start mb-6">
+          <div>
+            <h2 className="font-serif text-headline-lg text-primary">{event.coupleNames ?? "Untitled wedding"}</h2>
+            {event.weddingDate && (
+              <p className="font-sans text-body-sm text-on-surface-variant">
+                {event.weddingDate}
+                {daysUntilWedding !== null && daysUntilWedding >= 0 && ` · ${daysUntilWedding} days to go`}
+              </p>
+            )}
+            <Link
+              to={`/vendors?eventId=${event.id}`}
+              className="font-sans text-label-lg text-primary underline inline-block mt-2"
+            >
+              View vendors for this wedding
+            </Link>
+          </div>
+          {event.successful ? (
+            <span className="font-sans text-label-lg text-secondary">Marked successfully completed</span>
+          ) : (
+            <button
+              onClick={handleMarkSuccessful}
+              className="flex items-center gap-2 border border-primary text-primary px-6 py-2.5 rounded font-sans text-label-lg hover:bg-primary/5 transition-all"
+            >
+              <span className="material-symbols-outlined">check_circle</span>
+              Mark as successfully completed
+            </button>
           )}
         </div>
 
         {/* Ceremony tabs */}
         <div className="flex items-end gap-8 mb-10 border-b border-outline-variant overflow-x-auto">
-          {plan.ceremonies.map((ceremony) => (
+          {event.ceremonies.map((ceremony) => (
             <button
               key={ceremony.id}
               onClick={() => setActiveCeremonyId(ceremony.id)}
@@ -132,15 +210,7 @@ export function PlanPage() {
                       <tr key={task.id} className="hover:bg-surface-container-lowest transition-colors">
                         <td className="px-gutter py-6 font-sans text-body-md font-medium">{task.title}</td>
                         <td className="px-gutter py-6">
-                          <button
-                            onClick={() =>
-                              updateCeremonyTasks(
-                                activeCeremony.id,
-                                task.id,
-                                task.status === "confirmed" ? "pending" : "confirmed",
-                              )
-                            }
-                          >
+                          <button onClick={() => handleToggleTaskStatus(activeCeremony.id, task.id, task.status)}>
                             <StatusPill status={task.status} />
                           </button>
                         </td>
@@ -189,19 +259,14 @@ export function PlanPage() {
           <div className="space-y-4">
             <div className="h-20 bg-surface-container-low rounded-lg animate-pulse" />
             <div className="h-20 bg-surface-container-low rounded-lg animate-pulse" />
-            <p className="font-sans text-body-sm text-on-surface-variant text-center pt-2">
-              Checking for gaps...
-            </p>
+            <p className="font-sans text-body-sm text-on-surface-variant text-center pt-2">Checking for gaps...</p>
           </div>
         )}
 
         {gapsState.status === "error" && (
           <div className="bg-surface-container-low border border-outline-variant p-5 space-y-3">
             <p className="font-sans text-body-sm text-tertiary">{gapsState.message}</p>
-            <button
-              onClick={loadGaps}
-              className="font-sans text-label-lg text-primary underline"
-            >
+            <button onClick={() => loadGaps(event.id)} className="font-sans text-label-lg text-primary underline">
               Try again
             </button>
           </div>

@@ -6,6 +6,8 @@ import { intakeRouter } from "./routes/intake.js";
 import { copilotRouter } from "./routes/copilot.js";
 import { vendorsRouter } from "./routes/vendors.js";
 import { analyticsRouter } from "./routes/analytics.js";
+import { eventsRouter } from "./routes/events.js";
+import { dashboardRouter } from "./routes/dashboard.js";
 
 const app = express();
 
@@ -21,6 +23,8 @@ app.use("/api/intake", intakeRouter);
 app.use("/api/copilot", copilotRouter);
 app.use("/api/vendors", vendorsRouter);
 app.use("/api/analytics", analyticsRouter);
+app.use("/api/events", eventsRouter);
+app.use("/api/dashboard", dashboardRouter);
 
 app.listen(env.port, () => {
   console.log(`Sutradhar backend listening on port ${env.port}`);

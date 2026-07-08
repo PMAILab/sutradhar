@@ -2,6 +2,7 @@ import { Router } from "express";
 import { generateJson } from "../lib/gemini.js";
 import { trackEvent } from "../lib/analytics.js";
 import { getCeremonyDefinition, type Tradition } from "../data/ceremonyKnowledgeBase.js";
+import { getEventById, setLastGapCount } from "../data/eventsStore.js";
 import type { StructuredPlan, Gap } from "../types/plan.js";
 
 export const copilotRouter = Router();
@@ -50,13 +51,20 @@ Only include a checklistItemId in "covered" if the matching ceremony's tasks or 
 }
 
 copilotRouter.post("/check-gaps", async (req, res) => {
-  const plan = req.body?.plan as StructuredPlan | undefined;
-  const dismissedGapIds: string[] = Array.isArray(req.body?.dismissedGapIds) ? req.body.dismissedGapIds : [];
-
-  if (!plan || !Array.isArray(plan.ceremonies)) {
-    res.status(400).json({ error: "plan with a ceremonies array is required" });
+  const eventId = req.body?.eventId as string | undefined;
+  if (!eventId) {
+    res.status(400).json({ error: "eventId is required" });
     return;
   }
+
+  const event = getEventById(eventId);
+  if (!event) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+
+  const plan: StructuredPlan = event;
+  const dismissedGapIds = event.dismissedGapIds;
 
   if (plan.tradition === "unspecified") {
     res.json({
@@ -89,6 +97,7 @@ copilotRouter.post("/check-gaps", async (req, res) => {
   }
 
   if (candidates.length === 0) {
+    setLastGapCount(eventId, 0);
     res.json({ gaps: [] });
     return;
   }
@@ -107,6 +116,8 @@ copilotRouter.post("/check-gaps", async (req, res) => {
         reason: c.reason,
         severity: c.severity,
       }));
+
+    setLastGapCount(eventId, gaps.length);
 
     if (gaps.length > 0) {
       trackEvent("gap_flagged", { count: gaps.length, ceremonyNames: [...new Set(gaps.map((g) => g.ceremonyName))] });

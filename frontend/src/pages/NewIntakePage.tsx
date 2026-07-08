@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { parseIntake } from "../lib/api";
-import { usePlan } from "../context/PlanContext";
 
 const LOADING_STEPS = [
   "Reading your notes...",
@@ -16,7 +15,6 @@ export function NewIntakePage() {
   const [viewState, setViewState] = useState<ViewState>("idle");
   const [loadingStepIndex, setLoadingStepIndex] = useState(0);
   const [errorMessage, setErrorMessage] = useState("");
-  const { setPlan } = usePlan();
   const navigate = useNavigate();
 
   async function handleSubmit() {
@@ -33,10 +31,9 @@ export function NewIntakePage() {
     }, 900);
 
     try {
-      const { plan } = await parseIntake(rawText);
+      const { event } = await parseIntake(rawText);
       clearInterval(stepTimer);
-      setPlan(plan);
-      navigate("/plan");
+      navigate(`/events/${event.id}`);
     } catch (error) {
       clearInterval(stepTimer);
       setErrorMessage(

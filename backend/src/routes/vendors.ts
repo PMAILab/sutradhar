@@ -14,8 +14,11 @@ import { trackEvent } from "../lib/analytics.js";
 
 export const vendorsRouter = Router();
 
-vendorsRouter.get("/", (_req, res) => {
-  const withStatus = vendors.map((vendor) => {
+vendorsRouter.get("/", (req, res) => {
+  const eventId = typeof req.query.eventId === "string" ? req.query.eventId : undefined;
+  const scoped = eventId ? vendors.filter((v) => v.eventId === eventId) : vendors;
+
+  const withStatus = scoped.map((vendor) => {
     const status = computeVendorStatus(vendor.id);
     if (status === "needs_attention" && markEscalatedIfNew(vendor.id)) {
       trackEvent("vendor_escalated", { vendorId: vendor.id });
@@ -30,12 +33,12 @@ vendorsRouter.get("/", (_req, res) => {
 });
 
 vendorsRouter.post("/", (req, res) => {
-  const { name, role, phoneNumber } = req.body ?? {};
-  if (!name || !role || !phoneNumber) {
-    res.status(400).json({ error: "name, role, and phoneNumber are all required" });
+  const { eventId, name, role, phoneNumber } = req.body ?? {};
+  if (!eventId || !name || !role || !phoneNumber) {
+    res.status(400).json({ error: "eventId, name, role, and phoneNumber are all required" });
     return;
   }
-  const vendor = addVendor({ name, role, phoneNumber });
+  const vendor = addVendor({ eventId, name, role, phoneNumber });
   res.status(201).json({ vendor });
 });
 
