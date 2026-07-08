@@ -23,12 +23,18 @@ interface RawGeminiCeremony {
   tasks?: { title: string; vendor?: string; status?: string }[];
 }
 
+interface RawGeminiConflict {
+  description: string;
+  options: string[];
+}
+
 interface RawGeminiPlan {
   coupleNames: string | null;
   weddingDate: string | null;
   tradition: string;
   traditionConfidence: string;
   ceremonies: RawGeminiCeremony[];
+  conflicts?: RawGeminiConflict[];
 }
 
 function buildPrompt(rawText: string): string {
@@ -37,6 +43,8 @@ function buildPrompt(rawText: string): string {
 Known ceremony names to use when they match (use these exact names, do not invent new spellings): ${KNOWN_CEREMONY_NAMES.join(", ")}. If a ceremony is mentioned that doesn't match any of these, still include it under its own name.
 
 Identify which wedding tradition this appears to be, choosing exactly one of: "hindu_north_indian", "muslim_nikah", "sikh_anand_karaj", or "unspecified" if the text gives no clear religious or cultural signal. Do not guess a religion from names alone unless the text gives an actual signal (an explicit ceremony name, a explicit mention of religion, etc). If unsure, use "unspecified" and set traditionConfidence to "low".
+
+The brief may come from more than one family member and contain contradictions, two different dates for the same event, two different names for the same vendor role, conflicting instructions about the same thing. When you find a real contradiction, do not silently pick one side. Instead, resolve the plan using your best read of the most likely correct value, but also list the contradiction in "conflicts" so the planner can confirm it themselves. Do not invent a conflict that isn't actually there, only flag a genuine contradiction between two stated facts.
 
 Return strictly valid JSON matching this shape, no markdown, no commentary:
 {
@@ -51,6 +59,12 @@ Return strictly valid JSON matching this shape, no markdown, no commentary:
       "tasks": [
         { "title": string, "vendor": string or null, "status": "pending" | "confirmed" | "needs_review" }
       ]
+    }
+  ],
+  "conflicts": [
+    {
+      "description": string (plain description of the contradiction, e.g. "The bride's mother said the caterer is Grand Catering, but a later message says it's still undecided"),
+      "options": string[] (the distinct conflicting values found in the text, 2 or more)
     }
   ]
 }
@@ -95,6 +109,13 @@ intakeRouter.post("/parse", async (req, res) => {
             ? task.status
             : "pending") as "pending" | "confirmed" | "needs_review",
         })),
+      })),
+      conflicts: (raw.conflicts ?? []).map((conflict, conflictIndex) => ({
+        id: `conflict_${conflictIndex}_${Date.now()}`,
+        description: conflict.description,
+        options: conflict.options ?? [],
+        resolved: false,
+        resolvedValue: null,
       })),
     };
 

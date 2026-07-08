@@ -16,12 +16,21 @@ export interface PlanCeremony {
 
 export type Tradition = "hindu_north_indian" | "muslim_nikah" | "sikh_anand_karaj";
 
+export interface PlanConflict {
+  id: string;
+  description: string;
+  options: string[];
+  resolved: boolean;
+  resolvedValue: string | null;
+}
+
 export interface StructuredPlan {
   coupleNames: string | null;
   weddingDate: string | null;
   tradition: Tradition | "unspecified";
   traditionConfidence: "high" | "medium" | "low";
   ceremonies: PlanCeremony[];
+  conflicts: PlanConflict[];
 }
 
 export interface WeddingEvent extends StructuredPlan {
@@ -51,6 +60,7 @@ export interface Gap {
   label: string;
   reason: string;
   severity: "important" | "worth_checking";
+  kbVersion: string;
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -115,14 +125,49 @@ export function dismissGapApi(eventId: string, gapId: string): Promise<{ event: 
   });
 }
 
-export function markEventSuccessful(eventId: string, successful: boolean): Promise<{ event: WeddingEvent }> {
-  return request(`/api/events/${eventId}/mark-successful`, {
+export function resolveConflict(
+  eventId: string,
+  conflictId: string,
+  resolvedValue: string,
+): Promise<{ event: WeddingEvent }> {
+  return request(`/api/events/${eventId}/resolve-conflict`, {
     method: "POST",
-    body: JSON.stringify({ successful }),
+    body: JSON.stringify({ conflictId, resolvedValue }),
   });
 }
 
-export function checkGaps(eventId: string): Promise<{ gaps: Gap[]; note?: string }> {
+export interface MarkSuccessfulWarning {
+  warning: true;
+  message: string;
+  problemVendors: { id: string; name: string; role: string; status: string }[];
+  unresolvedConflicts: { id: string; description: string }[];
+}
+
+export type MarkSuccessfulResult = { event: WeddingEvent } | MarkSuccessfulWarning;
+
+export async function markEventSuccessful(
+  eventId: string,
+  successful: boolean,
+  acknowledgeIssues = false,
+): Promise<MarkSuccessfulResult> {
+  const response = await fetch(`${API_BASE_URL}/api/events/${eventId}/mark-successful`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ successful, acknowledgeIssues }),
+  });
+
+  const body = await response.json();
+
+  if (response.status === 409 && body.warning) {
+    return body as MarkSuccessfulWarning;
+  }
+  if (!response.ok) {
+    throw new Error(body.error ?? `Request failed with status ${response.status}`);
+  }
+  return body as { event: WeddingEvent };
+}
+
+export function checkGaps(eventId: string): Promise<{ gaps: Gap[]; note?: string; knowledgeBaseVersion?: string }> {
   return request("/api/copilot/check-gaps", {
     method: "POST",
     body: JSON.stringify({ eventId }),

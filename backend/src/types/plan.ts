@@ -14,12 +14,21 @@ export interface PlanCeremony {
   notes: string | null;
 }
 
+export interface PlanConflict {
+  id: string;
+  description: string;
+  options: string[];
+  resolved: boolean;
+  resolvedValue: string | null;
+}
+
 export interface StructuredPlan {
   coupleNames: string | null;
   weddingDate: string | null;
   tradition: Tradition | "unspecified";
   traditionConfidence: "high" | "medium" | "low";
   ceremonies: PlanCeremony[];
+  conflicts: PlanConflict[];
 }
 
 export interface Gap {
@@ -29,4 +38,5 @@ export interface Gap {
   label: string;
   reason: string;
   severity: "important" | "worth_checking";
+  kbVersion: string;
 }

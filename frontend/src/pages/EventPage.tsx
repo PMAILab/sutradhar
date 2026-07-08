@@ -8,8 +8,10 @@ import {
   updateTaskStatus,
   dismissGapApi,
   markEventSuccessful,
+  resolveConflict,
   type Gap,
   type WeddingEvent,
+  type MarkSuccessfulWarning,
 } from "../lib/api";
 import { StatusPill } from "../components/StatusPill";
 
@@ -30,6 +32,7 @@ export function EventPage() {
   const [activeCeremonyId, setActiveCeremonyId] = useState<string | null>(null);
   const [gapsState, setGapsState] = useState<GapsState>({ status: "loading" });
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [successWarning, setSuccessWarning] = useState<MarkSuccessfulWarning | null>(null);
 
   useEffect(() => {
     if (id) loadEvent(id);
@@ -121,8 +124,25 @@ export function EventPage() {
   }
 
   async function handleMarkSuccessful() {
-    await markEventSuccessful(event.id, true);
+    const result = await markEventSuccessful(event.id, true);
+    if ("warning" in result) {
+      setSuccessWarning(result);
+      return;
+    }
     navigate(`/events/${event.id}/success`);
+  }
+
+  async function handleConfirmAnyway() {
+    setSuccessWarning(null);
+    const result = await markEventSuccessful(event.id, true, true);
+    if (!("warning" in result)) {
+      navigate(`/events/${event.id}/success`);
+    }
+  }
+
+  async function handleResolveConflict(conflictId: string, resolvedValue: string) {
+    const { event: updated } = await resolveConflict(event.id, conflictId, resolvedValue);
+    setEventState({ status: "loaded", event: updated });
   }
 
   return (
@@ -157,6 +177,68 @@ export function EventPage() {
             </button>
           )}
         </div>
+
+        {successWarning && (
+          <div className="mb-8 bg-surface-container-low border border-tertiary rounded-lg p-6 space-y-4">
+            <p className="font-sans text-body-md text-on-surface">{successWarning.message}</p>
+            {successWarning.problemVendors.length > 0 && (
+              <ul className="font-sans text-body-sm text-on-surface-variant list-disc pl-5">
+                {successWarning.problemVendors.map((v) => (
+                  <li key={v.id}>
+                    {v.name} ({v.role}), status: {v.status.replace(/_/g, " ")}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {successWarning.unresolvedConflicts.length > 0 && (
+              <ul className="font-sans text-body-sm text-on-surface-variant list-disc pl-5">
+                {successWarning.unresolvedConflicts.map((c) => (
+                  <li key={c.id}>{c.description}</li>
+                ))}
+              </ul>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={handleConfirmAnyway}
+                className="px-6 py-2.5 bg-primary text-on-primary rounded font-sans text-label-lg hover:opacity-90"
+              >
+                Mark successful anyway
+              </button>
+              <button
+                onClick={() => setSuccessWarning(null)}
+                className="px-6 py-2.5 border border-outline rounded font-sans text-label-lg text-on-surface hover:bg-surface-container"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {event.conflicts.some((c) => !c.resolved) && (
+          <div className="mb-8 bg-surface-container-low border border-tertiary rounded-lg p-6 space-y-4">
+            <p className="font-sans text-label-lg text-tertiary uppercase tracking-widest">
+              Needs your confirmation
+            </p>
+            {event.conflicts
+              .filter((c) => !c.resolved)
+              .map((conflict) => (
+                <div key={conflict.id} className="space-y-2">
+                  <p className="font-sans text-body-md text-on-surface">{conflict.description}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {conflict.options.map((option) => (
+                      <button
+                        key={option}
+                        onClick={() => handleResolveConflict(conflict.id, option)}
+                        className="px-4 py-2 border border-outline rounded font-sans text-label-sm text-on-surface hover:bg-surface-container-high transition-colors"
+                      >
+                        {option}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </div>
+        )}
 
         {/* Ceremony tabs */}
         <div className="flex items-end gap-8 mb-10 border-b border-outline-variant overflow-x-auto">

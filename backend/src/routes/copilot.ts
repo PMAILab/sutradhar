@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { generateJson } from "../lib/gemini.js";
 import { trackEvent } from "../lib/analytics.js";
-import { getCeremonyDefinition, type Tradition } from "../data/ceremonyKnowledgeBase.js";
+import { getCeremonyDefinition, KNOWLEDGE_BASE_VERSION, type Tradition } from "../data/ceremonyKnowledgeBase.js";
 import { getEventById, setLastGapCount } from "../data/eventsStore.js";
 import type { StructuredPlan, Gap } from "../types/plan.js";
 
@@ -69,6 +69,7 @@ copilotRouter.post("/check-gaps", async (req, res) => {
   if (plan.tradition === "unspecified") {
     res.json({
       gaps: [],
+      knowledgeBaseVersion: KNOWLEDGE_BASE_VERSION,
       note: "The wedding's religion or region wasn't clear from the intake, so gap checking is paused. Confirm the tradition on the plan to turn this on.",
     });
     return;
@@ -98,7 +99,7 @@ copilotRouter.post("/check-gaps", async (req, res) => {
 
   if (candidates.length === 0) {
     setLastGapCount(eventId, 0);
-    res.json({ gaps: [] });
+    res.json({ gaps: [], knowledgeBaseVersion: KNOWLEDGE_BASE_VERSION });
     return;
   }
 
@@ -115,6 +116,7 @@ copilotRouter.post("/check-gaps", async (req, res) => {
         label: c.label,
         reason: c.reason,
         severity: c.severity,
+        kbVersion: KNOWLEDGE_BASE_VERSION,
       }));
 
     setLastGapCount(eventId, gaps.length);
@@ -123,7 +125,7 @@ copilotRouter.post("/check-gaps", async (req, res) => {
       trackEvent("gap_flagged", { count: gaps.length, ceremonyNames: [...new Set(gaps.map((g) => g.ceremonyName))] });
     }
 
-    res.json({ gaps });
+    res.json({ gaps, knowledgeBaseVersion: KNOWLEDGE_BASE_VERSION });
   } catch (error) {
     console.error("Completeness check failed:", error);
     res.status(502).json({ error: "Could not check for gaps right now, try again in a moment." });

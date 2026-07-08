@@ -12,6 +12,21 @@
  * rather than guessing wider coverage now.
  */
 
+/**
+ * Bump this and add a line to KNOWLEDGE_BASE_HISTORY whenever a
+ * checklist item's fact or reason text changes, so a gap can be traced
+ * back to exactly which version of the knowledge base produced it.
+ */
+export const KNOWLEDGE_BASE_VERSION = "1.0.0";
+
+export const KNOWLEDGE_BASE_HISTORY: { version: string; date: string; note: string }[] = [
+  {
+    version: "1.0.0",
+    date: "2026-07-08",
+    note: "Initial coverage: Hindu (North Indian), Muslim (Nikah), Sikh (Anand Karaj), 8 ceremonies total.",
+  },
+];
+
 export type Tradition = "hindu_north_indian" | "muslim_nikah" | "sikh_anand_karaj";
 
 export const TRADITIONS: { id: Tradition; label: string }[] = [

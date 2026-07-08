@@ -14,6 +14,7 @@ export function seedDemoData(): void {
     weddingDate: nDaysFromNow(5),
     tradition: "hindu_north_indian",
     traditionConfidence: "high",
+    conflicts: [],
     ceremonies: [
       {
         id: "ceremony_0_haldi",

@@ -6,6 +6,7 @@ import {
   setDismissedGapIds,
   markEventSuccessful,
   planTaskProgress,
+  resolveConflict,
 } from "../data/eventsStore.js";
 import { getVendorsForEvent, computeVendorStatus } from "../data/store.js";
 import { trackEvent } from "../lib/analytics.js";
@@ -103,15 +104,52 @@ eventsRouter.post("/:id/dismiss-gap", (req, res) => {
   res.json({ event });
 });
 
-eventsRouter.post("/:id/mark-successful", (req, res) => {
-  const { successful } = req.body ?? {};
-  const event = markEventSuccessful(req.params.id, Boolean(successful));
+eventsRouter.post("/:id/resolve-conflict", (req, res) => {
+  const { conflictId, resolvedValue } = req.body ?? {};
+  if (!conflictId || typeof resolvedValue !== "string") {
+    res.status(400).json({ error: "conflictId and resolvedValue are required" });
+    return;
+  }
+  const event = resolveConflict(req.params.id, conflictId, resolvedValue);
   if (!event) {
     res.status(404).json({ error: "Event not found" });
     return;
   }
-  if (event.successful) {
-    trackEvent("event_marked_successful", { eventId: event.id });
-  }
   res.json({ event });
+});
+
+eventsRouter.post("/:id/mark-successful", (req, res) => {
+  const event = getEventById(req.params.id);
+  if (!event) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+
+  const { successful, acknowledgeIssues } = req.body ?? {};
+
+  if (successful) {
+    const vendorStatuses = getVendorsForEvent(event.id).map((v) => ({
+      ...v,
+      status: computeVendorStatus(v.id),
+    }));
+    const problemVendors = vendorStatuses.filter((v) => v.status === "needs_attention" || v.status === "declined");
+    const unresolvedConflicts = event.conflicts.filter((c) => !c.resolved);
+
+    if ((problemVendors.length > 0 || unresolvedConflicts.length > 0) && !acknowledgeIssues) {
+      res.status(409).json({
+        warning: true,
+        message:
+          "This wedding has open issues, the North Star definition needs no missed vendor deadline. Confirm you want to mark it successful anyway.",
+        problemVendors: problemVendors.map((v) => ({ id: v.id, name: v.name, role: v.role, status: v.status })),
+        unresolvedConflicts: unresolvedConflicts.map((c) => ({ id: c.id, description: c.description })),
+      });
+      return;
+    }
+  }
+
+  const updated = markEventSuccessful(req.params.id, Boolean(successful));
+  if (updated?.successful) {
+    trackEvent("event_marked_successful", { eventId: updated.id, acknowledgedIssues: Boolean(acknowledgeIssues) });
+  }
+  res.json({ event: updated });
 });

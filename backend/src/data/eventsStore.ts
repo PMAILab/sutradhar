@@ -63,6 +63,17 @@ export function markEventSuccessful(eventId: string, successful: boolean): Weddi
   return event;
 }
 
+export function resolveConflict(eventId: string, conflictId: string, resolvedValue: string): WeddingEvent | undefined {
+  const event = getEventById(eventId);
+  if (!event) return undefined;
+  const conflict = event.conflicts.find((c) => c.id === conflictId);
+  if (conflict) {
+    conflict.resolved = true;
+    conflict.resolvedValue = resolvedValue;
+  }
+  return event;
+}
+
 export function planTaskProgress(event: WeddingEvent): { confirmed: number; total: number } {
   let confirmed = 0;
   let total = 0;
