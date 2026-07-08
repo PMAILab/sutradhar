@@ -8,6 +8,7 @@ import { vendorsRouter } from "./routes/vendors.js";
 import { analyticsRouter } from "./routes/analytics.js";
 import { eventsRouter } from "./routes/events.js";
 import { dashboardRouter } from "./routes/dashboard.js";
+import { seedDemoData } from "./seed.js";
 
 const app = express();
 
@@ -25,6 +26,10 @@ app.use("/api/vendors", vendorsRouter);
 app.use("/api/analytics", analyticsRouter);
 app.use("/api/events", eventsRouter);
 app.use("/api/dashboard", dashboardRouter);
+
+if (env.seedDemoData) {
+  seedDemoData();
+}
 
 app.listen(env.port, () => {
   console.log(`Sutradhar backend listening on port ${env.port}`);

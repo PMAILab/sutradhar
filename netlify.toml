@@ -1,0 +1,11 @@
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "frontend/dist"
+
+# Client-side routing, let React Router handle any path that isn't a
+# real static file (privacy.html, assets, etc still resolve directly).
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

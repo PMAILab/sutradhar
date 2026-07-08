@@ -89,7 +89,7 @@ export function VendorsPage() {
   const filteredEvent = filterEventId ? events.find((e) => e.id === filterEventId) : undefined;
 
   return (
-    <div className="flex-1 p-margin_desktop overflow-y-auto">
+    <div className="flex-1 p-margin_mobile md:p-margin_desktop overflow-y-auto">
       <div className="flex justify-between items-center mb-8">
         <div>
           <h2 className="font-serif text-headline-lg text-primary">Vendors</h2>
@@ -190,7 +190,7 @@ export function VendorsPage() {
       )}
 
       {listState.status === "loaded" && listState.vendors.length > 0 && (
-        <div className="bg-surface border border-outline-variant">
+        <div className="bg-surface border border-outline-variant overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-surface-container-low border-b border-outline-variant">

@@ -121,15 +121,15 @@ export function EventPage() {
   }
 
   async function handleMarkSuccessful() {
-    const { event: updated } = await markEventSuccessful(event.id, true);
-    setEventState({ status: "loaded", event: updated });
+    await markEventSuccessful(event.id, true);
+    navigate(`/events/${event.id}/success`);
   }
 
   return (
-    <div className="flex-1 flex overflow-hidden">
+    <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
       {/* Plan canvas */}
-      <div className="flex-1 p-margin_desktop overflow-y-auto">
-        <div className="flex justify-between items-start mb-6">
+      <div className="flex-1 p-margin_mobile md:p-margin_desktop overflow-y-auto">
+        <div className="flex flex-col sm:flex-row justify-between items-start gap-4 mb-6">
           <div>
             <h2 className="font-serif text-headline-lg text-primary">{event.coupleNames ?? "Untitled wedding"}</h2>
             {event.weddingDate && (
@@ -190,7 +190,7 @@ export function EventPage() {
                 </p>
               </div>
             ) : (
-              <div className="bg-surface border border-outline-variant">
+              <div className="bg-surface border border-outline-variant overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-surface-container-low border-b border-outline-variant">
@@ -244,7 +244,7 @@ export function EventPage() {
       </div>
 
       {/* Copilot side panel */}
-      <aside className="w-[400px] border-l border-outline-variant bg-surface flex flex-col p-gutter overflow-y-auto">
+      <aside className="w-full md:w-[400px] border-t md:border-t-0 md:border-l border-outline-variant bg-surface flex flex-col p-gutter overflow-y-auto">
         <div className="flex items-center gap-3 mb-8">
           <div className="p-2 bg-primary-container rounded-full">
             <span className="material-symbols-outlined text-on-primary-container">auto_awesome</span>

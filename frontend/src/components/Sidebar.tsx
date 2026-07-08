@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 
-const navItems = [
+export const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: "dashboard" },
   { to: "/intake", label: "New Intake", icon: "event" },
   { to: "/vendors", label: "Vendors", icon: "groups" },
@@ -9,7 +9,7 @@ const navItems = [
 
 export function Sidebar() {
   return (
-    <aside className="w-[280px] h-screen fixed left-0 top-0 flex flex-col py-base px-gutter bg-surface border-r border-outline-variant z-50">
+    <aside className="hidden md:flex w-[280px] h-screen fixed left-0 top-0 flex-col py-base px-gutter bg-surface border-r border-outline-variant z-50">
       <div className="mb-10">
         <h1 className="font-headline-lg text-headline-lg text-primary font-semibold italic">Sutradhar</h1>
         <p className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">

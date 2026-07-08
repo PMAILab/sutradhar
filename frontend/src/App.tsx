@@ -4,18 +4,20 @@ import { NewIntakePage } from "./pages/NewIntakePage";
 import { EventPage } from "./pages/EventPage";
 import { VendorsPage } from "./pages/VendorsPage";
 import { DashboardPage } from "./pages/DashboardPage";
-import { ComingSoonPage } from "./pages/ComingSoonPage";
+import { SettingsPage } from "./pages/SettingsPage";
+import { SuccessPage } from "./pages/SuccessPage";
 
 function App() {
   return (
     <Routes>
+      <Route path="/events/:id/success" element={<SuccessPage />} />
       <Route element={<AppLayout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/intake" element={<NewIntakePage />} />
         <Route path="/events/:id" element={<EventPage />} />
         <Route path="/vendors" element={<VendorsPage />} />
-        <Route path="/settings" element={<ComingSoonPage title="Settings" />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Route>
     </Routes>
   );

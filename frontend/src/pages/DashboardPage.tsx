@@ -34,7 +34,7 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="flex-1 p-margin_desktop overflow-y-auto max-w-container_max mx-auto w-full">
+    <div className="flex-1 p-margin_mobile md:p-margin_desktop overflow-y-auto max-w-container_max mx-auto w-full">
       <section className="mb-12">
         <h2 className="font-serif text-display-lg text-primary leading-tight mb-2">Good morning.</h2>
         <p className="font-serif text-headline-sm text-on-surface-variant italic">
@@ -48,7 +48,7 @@ export function DashboardPage() {
             <div className="h-24 bg-surface-container-low rounded-lg animate-pulse" />
             <div className="h-24 bg-surface-container-low rounded-lg animate-pulse" />
           </div>
-          <div className="col-span-12 lg:col-span-8 grid grid-cols-2 gap-gutter">
+          <div className="col-span-12 lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-gutter">
             <div className="h-48 bg-surface-container-low rounded-xl animate-pulse" />
             <div className="h-48 bg-surface-container-low rounded-xl animate-pulse" />
           </div>

@@ -23,6 +23,7 @@ export const env = {
   whatsappPhoneNumberId: optional("WHATSAPP_PHONE_NUMBER_ID"),
   whatsappBusinessAccountId: optional("WHATSAPP_BUSINESS_ACCOUNT_ID"),
   whatsappVerifyToken: optional("WHATSAPP_VERIFY_TOKEN"),
+  seedDemoData: optional("SEED_DEMO_DATA", "false") === "true",
 };
 
 export { required };
