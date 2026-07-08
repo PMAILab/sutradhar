@@ -66,3 +66,68 @@ export function checkGaps(
     body: JSON.stringify({ plan, dismissedGapIds }),
   });
 }
+
+export type VendorStatus = "not_contacted" | "sent" | "confirmed" | "declined" | "needs_review" | "needs_attention";
+
+export interface VendorMessage {
+  id: string;
+  vendorId: string;
+  direction: "outbound" | "inbound";
+  body: string;
+  templateName?: string;
+  deliveryStatus?: "sent" | "delivered" | "read" | "failed";
+  errorReason?: string;
+  timestamp: string;
+}
+
+export interface Vendor {
+  id: string;
+  name: string;
+  role: string;
+  phoneNumber: string;
+  createdAt: string;
+  status: VendorStatus;
+  lastMessage: VendorMessage | null;
+}
+
+export interface MessageTemplateDef {
+  name: string;
+  languageCode: string;
+  paramLabels: string[];
+}
+
+export function listVendors(): Promise<{ vendors: Vendor[] }> {
+  return request("/api/vendors");
+}
+
+export function addVendor(input: { name: string; role: string; phoneNumber: string }): Promise<{ vendor: Vendor }> {
+  return request("/api/vendors", { method: "POST", body: JSON.stringify(input) });
+}
+
+export function getVendorMessages(vendorId: string): Promise<{ messages: VendorMessage[] }> {
+  return request(`/api/vendors/${vendorId}/messages`);
+}
+
+export function getMessageTemplates(): Promise<{ templates: Record<string, MessageTemplateDef> }> {
+  return request("/api/vendors/templates");
+}
+
+export function sendVendorMessage(
+  vendorId: string,
+  templateName: string,
+  params: string[],
+): Promise<{ message: VendorMessage; status: VendorStatus }> {
+  return request(`/api/vendors/${vendorId}/send`, {
+    method: "POST",
+    body: JSON.stringify({ templateName, params }),
+  });
+}
+
+export function trackAnalyticsEvent(name: string, properties: Record<string, unknown> = {}): void {
+  request("/api/analytics/track", {
+    method: "POST",
+    body: JSON.stringify({ name, properties }),
+  }).catch(() => {
+    // Analytics failures should never interrupt the planner's flow.
+  });
+}

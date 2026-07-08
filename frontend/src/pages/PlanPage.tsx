@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePlan } from "../context/PlanContext";
-import { checkGaps, type Gap } from "../lib/api";
+import { checkGaps, trackAnalyticsEvent, type Gap } from "../lib/api";
 import { StatusPill } from "../components/StatusPill";
 
 type GapsState =
@@ -59,6 +59,12 @@ export function PlanPage() {
   function handleAddGapToPlan(gap: Gap) {
     addTaskToCeremony(gap.ceremonyId, gap.label);
     dismissGap(gap.id);
+    trackAnalyticsEvent("gap_confirmed", { gapId: gap.id, ceremonyName: gap.ceremonyName });
+  }
+
+  function handleDismissGap(gap: Gap) {
+    dismissGap(gap.id);
+    trackAnalyticsEvent("gap_dismissed", { gapId: gap.id, ceremonyName: gap.ceremonyName });
   }
 
   return (
@@ -227,7 +233,7 @@ export function PlanPage() {
                     Add to plan
                   </button>
                   <button
-                    onClick={() => dismissGap(gap.id)}
+                    onClick={() => handleDismissGap(gap)}
                     className="px-4 py-3 border border-outline font-sans text-label-lg text-on-surface hover:bg-surface-container transition-all"
                   >
                     Not relevant

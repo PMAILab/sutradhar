@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { generateJson } from "../lib/gemini.js";
+import { trackEvent } from "../lib/analytics.js";
 import { getCeremonyDefinition, type Tradition } from "../data/ceremonyKnowledgeBase.js";
 import type { StructuredPlan, Gap } from "../types/plan.js";
 
@@ -106,6 +107,10 @@ copilotRouter.post("/check-gaps", async (req, res) => {
         reason: c.reason,
         severity: c.severity,
       }));
+
+    if (gaps.length > 0) {
+      trackEvent("gap_flagged", { count: gaps.length, ceremonyNames: [...new Set(gaps.map((g) => g.ceremonyName))] });
+    }
 
     res.json({ gaps });
   } catch (error) {

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { generateJson } from "../lib/gemini.js";
+import { trackEvent } from "../lib/analytics.js";
 import type { StructuredPlan } from "../types/plan.js";
 
 export const intakeRouter = Router();
@@ -95,6 +96,11 @@ intakeRouter.post("/parse", async (req, res) => {
         })),
       })),
     };
+
+    trackEvent("structured_plan_generated", {
+      tradition: structuredPlan.tradition,
+      ceremonyCount: structuredPlan.ceremonies.length,
+    });
 
     res.json({ plan: structuredPlan });
   } catch (error) {
