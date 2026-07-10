@@ -1,6 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { env } from "../config/env.js";
 
+export function isGeminiConfigured(): boolean {
+  return Boolean(env.geminiApiKey);
+}
+
 let client: GoogleGenAI | null = null;
 
 function getClient(): GoogleGenAI {
@@ -13,7 +17,10 @@ function getClient(): GoogleGenAI {
   return client;
 }
 
-const MODEL = "gemini-2.5-flash";
+// "-latest" alias, not a pinned version: pinned Gemini model ids get
+// retired from new-user access on a rolling basis (gemini-2.5-flash and
+// gemini-2.5-flash-lite both 404 as of July 2026), the alias stays current.
+const MODEL = "gemini-flash-latest";
 
 export async function generateJson<T>(prompt: string): Promise<T> {
   const ai = getClient();

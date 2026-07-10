@@ -1,7 +1,5 @@
-/**
- * Temporary in-memory store, same stopgap as the frontend's PlanContext.
- * Swap for Supabase tables (vendors, messages) once that lands.
- */
+import { randomUUID } from "node:crypto";
+import { getSupabase } from "../lib/supabaseClient.js";
 
 export interface Vendor {
   id: string;
@@ -27,66 +25,153 @@ export interface Message {
   timestamp: string;
 }
 
-export const vendors: Vendor[] = [];
-export const messages: Message[] = [];
+interface VendorRow {
+  id: string;
+  event_id: string;
+  name: string;
+  role: string | null;
+  phone_number: string;
+  created_at: string;
+}
 
-let vendorCounter = 0;
-let messageCounter = 0;
+interface MessageRow {
+  id: string;
+  vendor_id: string;
+  direction: MessageDirection;
+  body: string;
+  template_name: string | null;
+  wa_message_id: string | null;
+  delivery_status: DeliveryStatus | null;
+  error_reason: string | null;
+  timestamp: string;
+}
 
-export function addVendor(input: { eventId: string; name: string; role: string; phoneNumber: string }): Vendor {
-  vendorCounter += 1;
-  const vendor: Vendor = {
-    id: `vendor_${vendorCounter}`,
-    eventId: input.eventId,
+function mapVendor(row: VendorRow): Vendor {
+  return {
+    id: row.id,
+    eventId: row.event_id,
+    name: row.name,
+    role: row.role ?? "",
+    phoneNumber: row.phone_number,
+    createdAt: row.created_at,
+  };
+}
+
+function mapMessage(row: MessageRow): Message {
+  return {
+    id: row.id,
+    vendorId: row.vendor_id,
+    direction: row.direction,
+    body: row.body,
+    templateName: row.template_name ?? undefined,
+    waMessageId: row.wa_message_id ?? undefined,
+    deliveryStatus: row.delivery_status ?? undefined,
+    errorReason: row.error_reason ?? undefined,
+    timestamp: row.timestamp,
+  };
+}
+
+export async function addVendor(input: {
+  eventId: string;
+  name: string;
+  role: string;
+  phoneNumber: string;
+}): Promise<Vendor> {
+  const row = {
+    id: randomUUID(),
+    event_id: input.eventId,
     name: input.name,
     role: input.role,
-    phoneNumber: input.phoneNumber.replace(/[^0-9]/g, ""),
-    createdAt: new Date().toISOString(),
+    phone_number: input.phoneNumber.replace(/[^0-9]/g, ""),
   };
-  vendors.push(vendor);
-  return vendor;
+  const { data, error } = await getSupabase().from("vendors").insert(row).select().single();
+  if (error) throw error;
+  return mapVendor(data);
 }
 
-export function getVendorById(id: string): Vendor | undefined {
-  return vendors.find((v) => v.id === id);
+export async function getVendorById(id: string): Promise<Vendor | undefined> {
+  const { data, error } = await getSupabase().from("vendors").select().eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data ? mapVendor(data) : undefined;
 }
 
-export function getVendorsForEvent(eventId: string): Vendor[] {
-  return vendors.filter((v) => v.eventId === eventId);
+export async function listVendors(eventId?: string): Promise<Vendor[]> {
+  let query = getSupabase().from("vendors").select();
+  if (eventId) query = query.eq("event_id", eventId);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []).map(mapVendor);
 }
 
-export function findVendorByPhone(phoneNumber: string): Vendor | undefined {
+export async function getVendorsForEvent(eventId: string): Promise<Vendor[]> {
+  return listVendors(eventId);
+}
+
+// Vendors don't carry planner_id directly, only via their event, so this
+// filters through the events join. Used for the unfiltered "all vendors"
+// view, where an eventId isn't already known-and-verified to belong to
+// the caller the way it is when getVendorsForEvent is called internally.
+export async function listVendorsForPlanner(plannerId: string, eventId?: string): Promise<Vendor[]> {
+  let query = getSupabase().from("vendors").select("*, events!inner(planner_id)").eq("events.planner_id", plannerId);
+  if (eventId) query = query.eq("event_id", eventId);
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data ?? []).map(mapVendor);
+}
+
+// Used to resolve a "Call Venue Manager" action on Event Detail without a
+// dedicated venue-contact column: a venue is just a vendor whose role or
+// name mentions "venue", same table, same status pipeline.
+export async function findVenueManagerVendor(eventId: string): Promise<Vendor | undefined> {
+  const vendors = await listVendors(eventId);
+  return vendors.find((v) => /venue/i.test(v.role) || /venue/i.test(v.name));
+}
+
+export async function findVendorByPhone(phoneNumber: string): Promise<Vendor | undefined> {
   const normalized = phoneNumber.replace(/[^0-9]/g, "");
-  return vendors.find((v) => v.phoneNumber === normalized);
+  const { data, error } = await getSupabase().from("vendors").select().eq("phone_number", normalized).maybeSingle();
+  if (error) throw error;
+  return data ? mapVendor(data) : undefined;
 }
 
-export function addMessage(input: Omit<Message, "id" | "timestamp"> & { timestamp?: string }): Message {
-  messageCounter += 1;
-  const message: Message = {
-    id: `message_${messageCounter}`,
+export async function addMessage(input: Omit<Message, "id" | "timestamp"> & { timestamp?: string }): Promise<Message> {
+  const row = {
+    id: randomUUID(),
+    vendor_id: input.vendorId,
+    direction: input.direction,
+    body: input.body,
+    template_name: input.templateName ?? null,
+    wa_message_id: input.waMessageId ?? null,
+    delivery_status: input.deliveryStatus ?? null,
+    error_reason: input.errorReason ?? null,
     timestamp: input.timestamp ?? new Date().toISOString(),
-    ...input,
   };
-  messages.push(message);
-  return message;
+  const { data, error } = await getSupabase().from("messages").insert(row).select().single();
+  if (error) throw error;
+  return mapMessage(data);
 }
 
-export function getMessagesForVendor(vendorId: string): Message[] {
-  return messages
-    .filter((m) => m.vendorId === vendorId)
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+export async function getMessagesForVendor(vendorId: string): Promise<Message[]> {
+  const { data, error } = await getSupabase()
+    .from("messages")
+    .select()
+    .eq("vendor_id", vendorId)
+    .order("timestamp", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map(mapMessage);
 }
 
-export function findMessageByWaId(waMessageId: string): Message | undefined {
-  return messages.find((m) => m.waMessageId === waMessageId);
+export async function updateMessageDeliveryStatus(waMessageId: string, status: DeliveryStatus): Promise<void> {
+  const { error } = await getSupabase().from("messages").update({ delivery_status: status }).eq("wa_message_id", waMessageId);
+  if (error) throw error;
 }
 
 const ESCALATION_HOURS = 48;
 
 export type VendorStatus = "not_contacted" | "sent" | "confirmed" | "declined" | "needs_review" | "needs_attention";
 
-export function computeVendorStatus(vendorId: string): VendorStatus {
-  const history = getMessagesForVendor(vendorId);
+export async function computeVendorStatus(vendorId: string): Promise<VendorStatus> {
+  const history = await getMessagesForVendor(vendorId);
   if (history.length === 0) return "not_contacted";
 
   const lastInbound = [...history].reverse().find((m) => m.direction === "inbound");
@@ -105,6 +190,8 @@ export function computeVendorStatus(vendorId: string): VendorStatus {
   return "not_contacted";
 }
 
+// In-memory on purpose: only dedupes escalation analytics events within a
+// process lifetime, not data that needs to survive a restart.
 const escalatedVendorIds = new Set<string>();
 
 export function markEscalatedIfNew(vendorId: string): boolean {

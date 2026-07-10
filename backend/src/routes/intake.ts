@@ -1,10 +1,12 @@
 import { Router } from "express";
-import { generateJson } from "../lib/gemini.js";
+import { generateJson, isGeminiConfigured } from "../lib/gemini.js";
 import { trackEvent } from "../lib/analytics.js";
 import { addEvent } from "../data/eventsStore.js";
 import type { StructuredPlan } from "../types/plan.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 export const intakeRouter = Router();
+intakeRouter.use(requireAuth);
 
 const KNOWN_CEREMONY_NAMES = [
   "Haldi",
@@ -75,6 +77,36 @@ ${rawText}
 """`;
 }
 
+/** Zero-AI fallback: never fail an intake closed. Drops the whole brief
+ *  into one "Review this brief" ceremony as a single task rather than
+ *  losing the planner's paste entirely — used both when GEMINI_API_KEY
+ *  isn't set (local dev/demo) and when a real Gemini call fails (quota,
+ *  outage). The planner loses structuring, not their client's brief. */
+function fallbackPlan(rawText: string): StructuredPlan {
+  return {
+    coupleNames: null,
+    weddingDate: null,
+    tradition: "unspecified",
+    traditionConfidence: "low",
+    ceremonies: [
+      {
+        id: "ceremony_0_review_this_brief",
+        name: "Review this brief",
+        notes: "Structuring wasn't available when this was pasted in, so nothing's been split into ceremonies yet. Read the brief below and add ceremonies and tasks manually, or come back and try again shortly.",
+        tasks: [
+          {
+            id: "ceremony_0_task_0",
+            title: rawText.length > 500 ? `${rawText.slice(0, 500)}…` : rawText,
+            vendor: null,
+            status: "needs_review",
+          },
+        ],
+      },
+    ],
+    conflicts: [],
+  };
+}
+
 intakeRouter.post("/parse", async (req, res) => {
   const rawText = req.body?.rawText;
 
@@ -83,52 +115,62 @@ intakeRouter.post("/parse", async (req, res) => {
     return;
   }
 
-  try {
-    const raw = await generateJson<RawGeminiPlan>(buildPrompt(rawText));
+  let structuredPlan: StructuredPlan;
+  let fallback = false;
 
-    const validTraditions = ["hindu_north_indian", "muslim_nikah", "sikh_anand_karaj", "unspecified"];
-    const tradition = validTraditions.includes(raw.tradition) ? raw.tradition : "unspecified";
-    const traditionConfidence = ["high", "medium", "low"].includes(raw.traditionConfidence)
-      ? raw.traditionConfidence
-      : "low";
+  if (!isGeminiConfigured()) {
+    structuredPlan = fallbackPlan(rawText);
+    fallback = true;
+  } else {
+    try {
+      const raw = await generateJson<RawGeminiPlan>(buildPrompt(rawText));
 
-    const structuredPlan: StructuredPlan = {
-      coupleNames: raw.coupleNames ?? null,
-      weddingDate: raw.weddingDate ?? null,
-      tradition: tradition as StructuredPlan["tradition"],
-      traditionConfidence: traditionConfidence as StructuredPlan["traditionConfidence"],
-      ceremonies: (raw.ceremonies ?? []).map((ceremony, ceremonyIndex) => ({
-        id: `ceremony_${ceremonyIndex}_${ceremony.name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
-        name: ceremony.name,
-        notes: ceremony.notes ?? null,
-        tasks: (ceremony.tasks ?? []).map((task, taskIndex) => ({
-          id: `ceremony_${ceremonyIndex}_task_${taskIndex}`,
-          title: task.title,
-          vendor: task.vendor ?? null,
-          status: (["pending", "confirmed", "needs_review"].includes(task.status ?? "")
-            ? task.status
-            : "pending") as "pending" | "confirmed" | "needs_review",
+      const validTraditions = ["hindu_north_indian", "muslim_nikah", "sikh_anand_karaj", "unspecified"];
+      const tradition = validTraditions.includes(raw.tradition) ? raw.tradition : "unspecified";
+      const traditionConfidence = ["high", "medium", "low"].includes(raw.traditionConfidence)
+        ? raw.traditionConfidence
+        : "low";
+
+      structuredPlan = {
+        coupleNames: raw.coupleNames ?? null,
+        weddingDate: raw.weddingDate ?? null,
+        tradition: tradition as StructuredPlan["tradition"],
+        traditionConfidence: traditionConfidence as StructuredPlan["traditionConfidence"],
+        ceremonies: (raw.ceremonies ?? []).map((ceremony, ceremonyIndex) => ({
+          id: `ceremony_${ceremonyIndex}_${ceremony.name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
+          name: ceremony.name,
+          notes: ceremony.notes ?? null,
+          tasks: (ceremony.tasks ?? []).map((task, taskIndex) => ({
+            id: `ceremony_${ceremonyIndex}_task_${taskIndex}`,
+            title: task.title,
+            vendor: task.vendor ?? null,
+            status: (["pending", "confirmed", "needs_review"].includes(task.status ?? "")
+              ? task.status
+              : "pending") as "pending" | "confirmed" | "needs_review",
+          })),
         })),
-      })),
-      conflicts: (raw.conflicts ?? []).map((conflict, conflictIndex) => ({
-        id: `conflict_${conflictIndex}_${Date.now()}`,
-        description: conflict.description,
-        options: conflict.options ?? [],
-        resolved: false,
-        resolvedValue: null,
-      })),
-    };
-
-    trackEvent("structured_plan_generated", {
-      tradition: structuredPlan.tradition,
-      ceremonyCount: structuredPlan.ceremonies.length,
-    });
-
-    const event = addEvent(structuredPlan);
-
-    res.json({ event });
-  } catch (error) {
-    console.error("Intake parse failed:", error);
-    res.status(502).json({ error: "Could not read that brief right now, try again in a moment." });
+        conflicts: (raw.conflicts ?? []).map((conflict, conflictIndex) => ({
+          id: `conflict_${conflictIndex}_${Date.now()}`,
+          description: conflict.description,
+          options: conflict.options ?? [],
+          resolved: false,
+          resolvedValue: null,
+        })),
+      };
+    } catch (error) {
+      console.error("Intake parse failed, falling back to a review ceremony:", error);
+      structuredPlan = fallbackPlan(rawText);
+      fallback = true;
+    }
   }
+
+  trackEvent("structured_plan_generated", {
+    tradition: structuredPlan.tradition,
+    ceremonyCount: structuredPlan.ceremonies.length,
+    fallback,
+  });
+
+  const event = await addEvent(structuredPlan, req.plannerId);
+
+  res.json({ event, fallback });
 });

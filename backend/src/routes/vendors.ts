@@ -1,44 +1,56 @@
 import { Router } from "express";
 import {
   addVendor,
-  vendors,
+  listVendorsForPlanner,
   getVendorById,
   addMessage,
   getMessagesForVendor,
   computeVendorStatus,
   markEscalatedIfNew,
 } from "../data/store.js";
+import type { Vendor } from "../data/store.js";
+import { getEventById } from "../data/eventsStore.js";
 import { MESSAGE_TEMPLATES } from "../data/messageTemplates.js";
 import { sendTemplateMessage, WhatsAppSendError } from "../lib/whatsapp.js";
 import { trackEvent } from "../lib/analytics.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 export const vendorsRouter = Router();
+vendorsRouter.use(requireAuth);
 
-vendorsRouter.get("/", (req, res) => {
+vendorsRouter.get("/", async (req, res) => {
   const eventId = typeof req.query.eventId === "string" ? req.query.eventId : undefined;
-  const scoped = eventId ? vendors.filter((v) => v.eventId === eventId) : vendors;
+  const scoped = await listVendorsForPlanner(req.plannerId, eventId);
 
-  const withStatus = scoped.map((vendor) => {
-    const status = computeVendorStatus(vendor.id);
-    if (status === "needs_attention" && markEscalatedIfNew(vendor.id)) {
-      trackEvent("vendor_escalated", { vendorId: vendor.id });
-    }
-    return {
-      ...vendor,
-      status,
-      lastMessage: getMessagesForVendor(vendor.id).at(-1) ?? null,
-    };
-  });
+  const withStatus = await Promise.all(
+    scoped.map(async (vendor) => {
+      const status = await computeVendorStatus(vendor.id);
+      if (status === "needs_attention" && markEscalatedIfNew(vendor.id)) {
+        trackEvent("vendor_escalated", { vendorId: vendor.id });
+      }
+      const history = await getMessagesForVendor(vendor.id);
+      return {
+        ...vendor,
+        status,
+        lastMessage: history.at(-1) ?? null,
+      };
+    }),
+  );
   res.json({ vendors: withStatus });
 });
 
-vendorsRouter.post("/", (req, res) => {
+vendorsRouter.post("/", async (req, res) => {
   const { eventId, name, role, phoneNumber } = req.body ?? {};
   if (!eventId || !name || !role || !phoneNumber) {
     res.status(400).json({ error: "eventId, name, role, and phoneNumber are all required" });
     return;
   }
-  const vendor = addVendor({ eventId, name, role, phoneNumber });
+  const event = await getEventById(eventId, req.plannerId);
+  if (!event) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+  const vendor = await addVendor({ eventId, name, role, phoneNumber });
   res.status(201).json({ vendor });
 });
 
@@ -46,18 +58,84 @@ vendorsRouter.get("/templates", (_req, res) => {
   res.json({ templates: MESSAGE_TEMPLATES });
 });
 
-vendorsRouter.get("/:id/messages", (req, res) => {
-  const vendor = getVendorById(req.params.id);
-  if (!vendor) {
+// Sends one plan_update to every vendor on the event that isn't already
+// confirmed, reusing the same send + logging path as a single manual send.
+// Confirmed vendors are skipped so a bulk reminder never re-pesters someone
+// who has already said yes.
+vendorsRouter.post("/bulk-reminder", async (req, res) => {
+  const { eventId } = req.body ?? {};
+  if (!eventId) {
+    res.status(400).json({ error: "eventId is required" });
+    return;
+  }
+  const event = await getEventById(eventId, req.plannerId);
+  if (!event) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+
+  const vendors: Vendor[] = await listVendorsForPlanner(req.plannerId, eventId);
+  const templateDef = MESSAGE_TEMPLATES.plan_update;
+  let sent = 0;
+  let failed = 0;
+
+  for (const vendor of vendors) {
+    const status = await computeVendorStatus(vendor.id);
+    if (status === "confirmed") continue;
+
+    const params = [
+      vendor.name,
+      event.coupleNames ?? "the couple",
+      "Checking in on where things stand, please confirm at your earliest convenience.",
+    ];
+    const previewBody = `[${templateDef.name}] ${params.join(" / ")}`;
+
+    try {
+      const { waMessageId } = await sendTemplateMessage(
+        vendor.phoneNumber,
+        templateDef.name,
+        templateDef.languageCode,
+        params,
+      );
+      await addMessage({
+        vendorId: vendor.id,
+        direction: "outbound",
+        body: previewBody,
+        templateName: templateDef.name,
+        waMessageId,
+        deliveryStatus: "sent",
+      });
+      sent += 1;
+    } catch (error) {
+      const reason = error instanceof WhatsAppSendError ? error.message : "Could not send that message right now.";
+      await addMessage({
+        vendorId: vendor.id,
+        direction: "outbound",
+        body: previewBody,
+        templateName: templateDef.name,
+        deliveryStatus: "failed",
+        errorReason: reason,
+      });
+      failed += 1;
+    }
+  }
+
+  trackEvent("vendor_bulk_reminder_sent", { eventId, sent, failed });
+  res.json({ sent, failed });
+});
+
+vendorsRouter.get("/:id/messages", async (req, res) => {
+  const vendor = await getVendorById(req.params.id);
+  if (!vendor || !(await getEventById(vendor.eventId, req.plannerId))) {
     res.status(404).json({ error: "Vendor not found" });
     return;
   }
-  res.json({ messages: getMessagesForVendor(vendor.id) });
+  res.json({ messages: await getMessagesForVendor(vendor.id) });
 });
 
 vendorsRouter.post("/:id/send", async (req, res) => {
-  const vendor = getVendorById(req.params.id);
-  if (!vendor) {
+  const vendor = await getVendorById(req.params.id);
+  if (!vendor || !(await getEventById(vendor.eventId, req.plannerId))) {
     res.status(404).json({ error: "Vendor not found" });
     return;
   }
@@ -85,7 +163,7 @@ vendorsRouter.post("/:id/send", async (req, res) => {
       params,
     );
 
-    const message = addMessage({
+    const message = await addMessage({
       vendorId: vendor.id,
       direction: "outbound",
       body: previewBody,
@@ -96,11 +174,11 @@ vendorsRouter.post("/:id/send", async (req, res) => {
 
     trackEvent("vendor_message_sent", { vendorId: vendor.id, templateName: templateDef.name });
 
-    res.status(201).json({ message, status: computeVendorStatus(vendor.id) });
+    res.status(201).json({ message, status: await computeVendorStatus(vendor.id) });
   } catch (error) {
     const reason = error instanceof WhatsAppSendError ? error.message : "Could not send that message right now.";
 
-    addMessage({
+    await addMessage({
       vendorId: vendor.id,
       direction: "outbound",
       body: previewBody,

@@ -1,8 +1,10 @@
 import { Router } from "express";
 import { listEvents, planTaskProgress } from "../data/eventsStore.js";
 import { getVendorsForEvent, computeVendorStatus } from "../data/store.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 export const dashboardRouter = Router();
+dashboardRouter.use(requireAuth);
 
 interface UrgentItem {
   id: string;
@@ -18,16 +20,16 @@ interface UrgentItem {
  * confirmations first, upcoming ceremony deadlines next, unresolved
  * Completeness Copilot gaps last. No learned model, just tiers.
  */
-dashboardRouter.get("/", (_req, res) => {
-  const events = listEvents().filter((e) => e.successful === null);
+dashboardRouter.get("/", async (req, res) => {
+  const events = (await listEvents(req.plannerId)).filter((e) => e.successful === null);
   const urgentItems: UrgentItem[] = [];
 
   for (const event of events) {
     const coupleNames = event.coupleNames ?? "Untitled wedding";
-    const vendors = getVendorsForEvent(event.id);
+    const vendors = await getVendorsForEvent(event.id);
 
     for (const vendor of vendors) {
-      const status = computeVendorStatus(vendor.id);
+      const status = await computeVendorStatus(vendor.id);
       if (status === "needs_attention") {
         urgentItems.push({
           id: `${event.id}_vendor_${vendor.id}`,
@@ -80,23 +82,28 @@ dashboardRouter.get("/", (_req, res) => {
 
   urgentItems.sort((a, b) => a.tier - b.tier);
 
-  const eventSummaries = events.map((event) => {
-    const progress = planTaskProgress(event);
-    const vendorStatuses = getVendorsForEvent(event.id).map((v) => computeVendorStatus(v.id));
-    return {
-      id: event.id,
-      coupleNames: event.coupleNames,
-      weddingDate: event.weddingDate,
-      tradition: event.tradition,
-      progress,
-      vendorSummary: {
-        total: vendorStatuses.length,
-        confirmed: vendorStatuses.filter((s) => s === "confirmed").length,
-        needsAttention: vendorStatuses.filter((s) => s === "needs_attention").length,
-      },
-      lastGapCount: event.lastGapCount,
-    };
-  });
+  const eventSummaries = await Promise.all(
+    events.map(async (event) => {
+      const progress = planTaskProgress(event);
+      const vendors = await getVendorsForEvent(event.id);
+      const vendorStatuses = await Promise.all(vendors.map((v) => computeVendorStatus(v.id)));
+      return {
+        id: event.id,
+        coupleNames: event.coupleNames,
+        weddingDate: event.weddingDate,
+        tradition: event.tradition,
+        city: event.city,
+        guestCount: event.guestCount,
+        progress,
+        vendorSummary: {
+          total: vendorStatuses.length,
+          confirmed: vendorStatuses.filter((s) => s === "confirmed").length,
+          needsAttention: vendorStatuses.filter((s) => s === "needs_attention").length,
+        },
+        lastGapCount: event.lastGapCount,
+      };
+    }),
+  );
 
   res.json({
     urgentItems: urgentItems.slice(0, 3),

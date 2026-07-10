@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { env } from "../config/env.js";
-import { findVendorByPhone, addMessage, findMessageByWaId, computeVendorStatus } from "../data/store.js";
+import { findVendorByPhone, addMessage, updateMessageDeliveryStatus, computeVendorStatus } from "../data/store.js";
 import { trackEvent } from "../lib/analytics.js";
 import type { DeliveryStatus } from "../data/store.js";
 
@@ -43,31 +43,31 @@ whatsappWebhookRouter.post("/", (req, res) => {
   // Ack immediately, Meta expects a fast 200 regardless of processing outcome.
   res.sendStatus(200);
 
-  try {
-    const entries = req.body?.entry ?? [];
-    for (const entry of entries) {
-      for (const change of entry.changes ?? []) {
-        const value: WebhookValue = change.value ?? {};
-        handleInboundMessages(value.messages ?? []);
-        handleStatusUpdates(value.statuses ?? []);
-      }
+  const entries = req.body?.entry ?? [];
+  for (const entry of entries) {
+    for (const change of entry.changes ?? []) {
+      const value: WebhookValue = change.value ?? {};
+      handleInboundMessages(value.messages ?? []).catch((error) =>
+        console.error("Failed to process inbound WhatsApp messages:", error),
+      );
+      handleStatusUpdates(value.statuses ?? []).catch((error) =>
+        console.error("Failed to process WhatsApp status updates:", error),
+      );
     }
-  } catch (error) {
-    console.error("Failed to process WhatsApp webhook payload:", error);
   }
 });
 
-function handleInboundMessages(inboundMessages: InboundMessage[]) {
+async function handleInboundMessages(inboundMessages: InboundMessage[]): Promise<void> {
   for (const inbound of inboundMessages) {
     if (inbound.type !== "text" || !inbound.text) continue;
 
-    const vendor = findVendorByPhone(inbound.from);
+    const vendor = await findVendorByPhone(inbound.from);
     if (!vendor) {
       console.log(`Received WhatsApp reply from unknown number ${inbound.from}, ignoring.`);
       continue;
     }
 
-    addMessage({
+    await addMessage({
       vendorId: vendor.id,
       direction: "inbound",
       body: inbound.text.body,
@@ -75,21 +75,19 @@ function handleInboundMessages(inboundMessages: InboundMessage[]) {
       timestamp: new Date(Number(inbound.timestamp) * 1000).toISOString(),
     });
 
-    const status = computeVendorStatus(vendor.id);
+    const status = await computeVendorStatus(vendor.id);
     if (status === "confirmed") {
       trackEvent("vendor_confirmed", { vendorId: vendor.id });
     }
   }
 }
 
-function handleStatusUpdates(statusUpdates: StatusUpdate[]) {
+async function handleStatusUpdates(statusUpdates: StatusUpdate[]): Promise<void> {
   const knownStatuses: DeliveryStatus[] = ["sent", "delivered", "read", "failed"];
 
   for (const update of statusUpdates) {
-    const message = findMessageByWaId(update.id);
-    if (!message) continue;
     if (knownStatuses.includes(update.status as DeliveryStatus)) {
-      message.deliveryStatus = update.status as DeliveryStatus;
+      await updateMessageDeliveryStatus(update.id, update.status as DeliveryStatus);
     }
   }
 }

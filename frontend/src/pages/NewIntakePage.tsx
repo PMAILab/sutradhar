@@ -65,7 +65,7 @@ export function NewIntakePage() {
   return (
     <section className="flex-1 max-w-[900px] mx-auto w-full px-gutter py-12">
       <div className="mb-10 text-center">
-        <h2 className="font-serif text-display-lg text-primary mb-4">Start a new client intake</h2>
+        <h2 className="font-serif text-display-lg text-primary mb-4">Start a New Weaving</h2>
         <p className="font-sans text-body-lg text-on-surface-variant max-w-2xl mx-auto">
           Paste the client's WhatsApp messages, notes, or a rough brief here. Sutradhar will structure it into a
           ceremony by ceremony plan.

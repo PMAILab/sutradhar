@@ -1,11 +1,14 @@
 import { Router } from "express";
-import { generateJson } from "../lib/gemini.js";
+import { generateJson, isGeminiConfigured } from "../lib/gemini.js";
+import { getOrSet } from "../lib/cache.js";
 import { trackEvent } from "../lib/analytics.js";
 import { getCeremonyDefinition, KNOWLEDGE_BASE_VERSION, type Tradition } from "../data/ceremonyKnowledgeBase.js";
 import { getEventById, setLastGapCount } from "../data/eventsStore.js";
 import type { StructuredPlan, Gap } from "../types/plan.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 export const copilotRouter = Router();
+copilotRouter.use(requireAuth);
 
 interface CandidateGap {
   ceremonyId: string;
@@ -57,7 +60,7 @@ copilotRouter.post("/check-gaps", async (req, res) => {
     return;
   }
 
-  const event = getEventById(eventId);
+  const event = await getEventById(eventId, req.plannerId);
   if (!event) {
     res.status(404).json({ error: "Event not found" });
     return;
@@ -98,36 +101,69 @@ copilotRouter.post("/check-gaps", async (req, res) => {
   }
 
   if (candidates.length === 0) {
-    setLastGapCount(eventId, 0);
+    await setLastGapCount(eventId, 0);
     res.json({ gaps: [], knowledgeBaseVersion: KNOWLEDGE_BASE_VERSION });
     return;
   }
 
-  try {
-    const coverage = await generateJson<CoverageResult>(buildCoveragePrompt(plan, candidates));
-    const coveredIds = new Set(coverage.covered ?? []);
+  const COVERAGE_TTL_MS = 10 * 60 * 1000; // repeat visits to the same event within a session cost zero extra calls
+  const COVERAGE_FALLBACK_TTL_MS = 90 * 1000; // a quota blip shouldn't keep every candidate flagged for a full 10 minutes once it recovers
 
-    const gaps: Gap[] = candidates
-      .filter((c) => !coveredIds.has(c.checklistItemId))
-      .map((c) => ({
-        id: c.checklistItemId,
-        ceremonyId: c.ceremonyId,
-        ceremonyName: c.ceremonyName,
-        label: c.label,
-        reason: c.reason,
-        severity: c.severity,
-        kbVersion: KNOWLEDGE_BASE_VERSION,
-      }));
+  // Includes the plan's own task content, not just the event id — a stale
+  // cache entry from before a task was added/edited would otherwise judge
+  // coverage against the old plan. Self-invalidating: the key simply
+  // changes when the plan does, no manual invalidation needed.
+  const planFingerprint = plan.ceremonies
+    .map((c) => `${c.id}:${c.tasks.map((t) => `${t.title}|${t.status}`).join(",")}`)
+    .join(";");
+  const cacheKey = `checkGaps:${eventId}:${planFingerprint}:${dismissedGapIds.join(",")}`;
 
-    setLastGapCount(eventId, gaps.length);
+  const { coveredIds, fallback } = await getOrSet(
+    cacheKey,
+    (v) => (v.fallback ? COVERAGE_FALLBACK_TTL_MS : COVERAGE_TTL_MS),
+    async (): Promise<{ coveredIds: Set<string>; fallback: boolean }> => {
+      if (!isGeminiConfigured()) {
+        // No AI available to judge coverage: treat every candidate as an
+        // unconfirmed gap rather than hiding the Completeness Copilot
+        // entirely — matches this route's own philosophy ("if in doubt,
+        // leave it out, so it surfaces as a gap"), just applied to a total
+        // AI outage instead of a single uncertain item.
+        return { coveredIds: new Set(), fallback: true };
+      }
+      try {
+        const coverage = await generateJson<CoverageResult>(buildCoveragePrompt(plan, candidates));
+        return { coveredIds: new Set(coverage.covered ?? []), fallback: false };
+      } catch (error) {
+        console.error("Completeness check failed, falling back to flag-everything:", error);
+        return { coveredIds: new Set(), fallback: true };
+      }
+    },
+  );
 
-    if (gaps.length > 0) {
-      trackEvent("gap_flagged", { count: gaps.length, ceremonyNames: [...new Set(gaps.map((g) => g.ceremonyName))] });
-    }
+  const gaps: Gap[] = candidates
+    .filter((c) => !coveredIds.has(c.checklistItemId))
+    .map((c) => ({
+      id: c.checklistItemId,
+      ceremonyId: c.ceremonyId,
+      ceremonyName: c.ceremonyName,
+      label: c.label,
+      reason: c.reason,
+      severity: c.severity,
+      kbVersion: KNOWLEDGE_BASE_VERSION,
+    }));
 
-    res.json({ gaps, knowledgeBaseVersion: KNOWLEDGE_BASE_VERSION });
-  } catch (error) {
-    console.error("Completeness check failed:", error);
-    res.status(502).json({ error: "Could not check for gaps right now, try again in a moment." });
+  await setLastGapCount(eventId, gaps.length);
+
+  if (gaps.length > 0) {
+    trackEvent("gap_flagged", { count: gaps.length, ceremonyNames: [...new Set(gaps.map((g) => g.ceremonyName))] });
   }
+
+  res.json({
+    gaps,
+    knowledgeBaseVersion: KNOWLEDGE_BASE_VERSION,
+    fallback,
+    note: fallback
+      ? "Structuring help wasn't available for this check, so everything below is unfiltered, some may already be covered in your plan."
+      : undefined,
+  });
 });

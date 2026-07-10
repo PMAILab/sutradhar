@@ -8,45 +8,77 @@ import {
   planTaskProgress,
   resolveConflict,
 } from "../data/eventsStore.js";
-import { getVendorsForEvent, computeVendorStatus } from "../data/store.js";
+import { getVendorsForEvent, computeVendorStatus, getMessagesForVendor, findVenueManagerVendor } from "../data/store.js";
 import { trackEvent } from "../lib/analytics.js";
+import { requireAuth } from "../middleware/requireAuth.js";
 
 export const eventsRouter = Router();
+eventsRouter.use(requireAuth);
 
-eventsRouter.get("/", (_req, res) => {
-  const withSummary = listEvents().map((event) => {
-    const progress = planTaskProgress(event);
-    const vendorStatuses = getVendorsForEvent(event.id).map((v) => computeVendorStatus(v.id));
-    return {
-      id: event.id,
-      coupleNames: event.coupleNames,
-      weddingDate: event.weddingDate,
-      tradition: event.tradition,
-      ceremonyCount: event.ceremonies.length,
-      progress,
-      vendorSummary: {
-        total: vendorStatuses.length,
-        confirmed: vendorStatuses.filter((s) => s === "confirmed").length,
-        needsAttention: vendorStatuses.filter((s) => s === "needs_attention").length,
-      },
-      lastGapCount: event.lastGapCount,
-      successful: event.successful,
-    };
-  });
+eventsRouter.get("/", async (req, res) => {
+  const events = await listEvents(req.plannerId);
+  const withSummary = await Promise.all(
+    events.map(async (event) => {
+      const progress = planTaskProgress(event);
+      const vendors = await getVendorsForEvent(event.id);
+      const vendorStatuses = await Promise.all(vendors.map((v) => computeVendorStatus(v.id)));
+      return {
+        id: event.id,
+        coupleNames: event.coupleNames,
+        weddingDate: event.weddingDate,
+        tradition: event.tradition,
+        city: event.city,
+        guestCount: event.guestCount,
+        ceremonyCount: event.ceremonies.length,
+        progress,
+        vendorSummary: {
+          total: vendorStatuses.length,
+          confirmed: vendorStatuses.filter((s) => s === "confirmed").length,
+          needsAttention: vendorStatuses.filter((s) => s === "needs_attention").length,
+        },
+        lastGapCount: event.lastGapCount,
+        successful: event.successful,
+      };
+    }),
+  );
   res.json({ events: withSummary });
 });
 
-eventsRouter.get("/:id", (req, res) => {
-  const event = getEventById(req.params.id);
+eventsRouter.get("/:id", async (req, res) => {
+  const event = await getEventById(req.params.id, req.plannerId);
   if (!event) {
     res.status(404).json({ error: "Event not found" });
     return;
   }
-  res.json({ event });
+  const venueManager = await findVenueManagerVendor(event.id);
+  res.json({ event, venueManagerPhone: venueManager?.phoneNumber ?? null });
 });
 
-eventsRouter.post("/:id/tasks", (req, res) => {
-  const event = getEventById(req.params.id);
+// Activity tab feed: every WhatsApp message across every vendor on this
+// event, merged and sorted newest first. No separate activity log table,
+// this is the real send/receive history already captured per vendor.
+eventsRouter.get("/:id/activity", async (req, res) => {
+  const event = await getEventById(req.params.id, req.plannerId);
+  if (!event) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+  const vendors = await getVendorsForEvent(event.id);
+  const vendorById = new Map(vendors.map((v) => [v.id, v]));
+  const messagesByVendor = await Promise.all(vendors.map((v) => getMessagesForVendor(v.id)));
+  const activity = messagesByVendor
+    .flat()
+    .map((message) => ({
+      ...message,
+      vendorName: vendorById.get(message.vendorId)?.name ?? "Unknown vendor",
+      vendorRole: vendorById.get(message.vendorId)?.role ?? "",
+    }))
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  res.json({ activity });
+});
+
+eventsRouter.post("/:id/tasks", async (req, res) => {
+  const event = await getEventById(req.params.id, req.plannerId);
   if (!event) {
     res.status(404).json({ error: "Event not found" });
     return;
@@ -65,12 +97,12 @@ eventsRouter.post("/:id/tasks", (req, res) => {
     status: "pending",
   });
 
-  updateCeremonies(event.id, event.ceremonies);
+  await updateCeremonies(event.id, event.ceremonies);
   res.status(201).json({ event });
 });
 
-eventsRouter.patch("/:id/tasks/:taskId", (req, res) => {
-  const event = getEventById(req.params.id);
+eventsRouter.patch("/:id/tasks/:taskId", async (req, res) => {
+  const event = await getEventById(req.params.id, req.plannerId);
   if (!event) {
     res.status(404).json({ error: "Event not found" });
     return;
@@ -84,12 +116,12 @@ eventsRouter.patch("/:id/tasks/:taskId", (req, res) => {
   }
 
   task.status = status;
-  updateCeremonies(event.id, event.ceremonies);
+  await updateCeremonies(event.id, event.ceremonies);
   res.json({ event });
 });
 
-eventsRouter.post("/:id/dismiss-gap", (req, res) => {
-  const event = getEventById(req.params.id);
+eventsRouter.post("/:id/dismiss-gap", async (req, res) => {
+  const event = await getEventById(req.params.id, req.plannerId);
   if (!event) {
     res.status(404).json({ error: "Event not found" });
     return;
@@ -100,26 +132,27 @@ eventsRouter.post("/:id/dismiss-gap", (req, res) => {
     return;
   }
   const nextIds = event.dismissedGapIds.includes(gapId) ? event.dismissedGapIds : [...event.dismissedGapIds, gapId];
-  setDismissedGapIds(event.id, nextIds);
-  res.json({ event });
+  await setDismissedGapIds(event.id, nextIds);
+  res.json({ event: { ...event, dismissedGapIds: nextIds } });
 });
 
-eventsRouter.post("/:id/resolve-conflict", (req, res) => {
+eventsRouter.post("/:id/resolve-conflict", async (req, res) => {
   const { conflictId, resolvedValue } = req.body ?? {};
   if (!conflictId || typeof resolvedValue !== "string") {
     res.status(400).json({ error: "conflictId and resolvedValue are required" });
     return;
   }
-  const event = resolveConflict(req.params.id, conflictId, resolvedValue);
-  if (!event) {
+  const owned = await getEventById(req.params.id, req.plannerId);
+  if (!owned) {
     res.status(404).json({ error: "Event not found" });
     return;
   }
+  const event = await resolveConflict(req.params.id, conflictId, resolvedValue);
   res.json({ event });
 });
 
-eventsRouter.post("/:id/mark-successful", (req, res) => {
-  const event = getEventById(req.params.id);
+eventsRouter.post("/:id/mark-successful", async (req, res) => {
+  const event = await getEventById(req.params.id, req.plannerId);
   if (!event) {
     res.status(404).json({ error: "Event not found" });
     return;
@@ -128,10 +161,13 @@ eventsRouter.post("/:id/mark-successful", (req, res) => {
   const { successful, acknowledgeIssues } = req.body ?? {};
 
   if (successful) {
-    const vendorStatuses = getVendorsForEvent(event.id).map((v) => ({
-      ...v,
-      status: computeVendorStatus(v.id),
-    }));
+    const vendors = await getVendorsForEvent(event.id);
+    const vendorStatuses = await Promise.all(
+      vendors.map(async (v) => ({
+        ...v,
+        status: await computeVendorStatus(v.id),
+      })),
+    );
     const problemVendors = vendorStatuses.filter((v) => v.status === "needs_attention" || v.status === "declined");
     const unresolvedConflicts = event.conflicts.filter((c) => !c.resolved);
 
@@ -147,7 +183,7 @@ eventsRouter.post("/:id/mark-successful", (req, res) => {
     }
   }
 
-  const updated = markEventSuccessful(req.params.id, Boolean(successful));
+  const updated = await markEventSuccessful(req.params.id, Boolean(successful));
   if (updated?.successful) {
     trackEvent("event_marked_successful", { eventId: updated.id, acknowledgedIssues: Boolean(acknowledgeIssues) });
   }

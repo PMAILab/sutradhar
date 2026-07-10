@@ -1,7 +1,29 @@
+# Netlify site config for Sutradhar's frontend only. The API is a separate
+# Render service (see render.yaml), reverse-proxied through /api/* below
+# rather than called cross-origin from the browser — see the redirect
+# comment for why. Never set VITE_API_BASE_URL — leave it unset so the
+# frontend's fetch calls stay relative ("/api/...") and go through this
+# same-origin proxy instead of straight to Render.
 [build]
   base = "frontend"
   command = "npm run build"
   publish = "frontend/dist"
+
+# Proxies /api/* to the Render backend server-to-server (Netlify's edge
+# makes the request, not the browser) — so from the browser's perspective
+# every request, including the Google OAuth round trip, stays on this
+# site's own origin. Without this, /api/* calls are genuinely cross-origin
+# to Render, and the session cookie Render sets is a third-party cookie:
+# browsers that block those (Safari always; Chrome increasingly) silently
+# drop it, so a sign-in "succeeds" but never actually persists. Must come
+# before the catch-all SPA redirect below, or that one swallows /api/*
+# first (first matching redirect wins). Update the target host if the
+# Render service is ever renamed/recreated.
+[[redirects]]
+  from = "/api/*"
+  to = "https://sutradhar-backend.onrender.com/api/:splat"
+  status = 200
+  force = true
 
 # Client-side routing, let React Router handle any path that isn't a
 # real static file (privacy.html, assets, etc still resolve directly).

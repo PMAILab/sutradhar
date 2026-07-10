@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getDashboard, type DashboardUrgentItem, type EventSummary } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
+import { plannerDisplayName } from "../lib/user";
+import { EventCard } from "../components/EventCard";
+import { Skeleton } from "../components/ui/Skeleton";
+import { ErrorState } from "../components/ui/ErrorState";
+import { EmptyState } from "../components/ui/EmptyState";
+
+function timeOfDayGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
 
 type DashboardState =
   | { status: "loading" }
@@ -14,7 +27,9 @@ const TIER_STYLE: Record<number, { border: string; dot: string; text: string }> 
 };
 
 export function DashboardPage() {
+  const { user } = useAuth();
   const [state, setState] = useState<DashboardState>({ status: "loading" });
+  const name = plannerDisplayName(user);
 
   useEffect(() => {
     load();
@@ -36,7 +51,9 @@ export function DashboardPage() {
   return (
     <div className="flex-1 p-margin_mobile md:p-margin_desktop overflow-y-auto max-w-container_max mx-auto w-full">
       <section className="mb-12">
-        <h2 className="font-serif text-display-lg text-primary leading-tight mb-2">Good morning.</h2>
+        <h2 className="font-serif text-display-lg text-primary leading-tight mb-2">
+          {timeOfDayGreeting()}{name ? `, ${name}` : ""}.
+        </h2>
         <p className="font-serif text-headline-sm text-on-surface-variant italic">
           Here's what needs you today.
         </p>
@@ -45,22 +62,19 @@ export function DashboardPage() {
       {state.status === "loading" && (
         <div className="grid grid-cols-12 gap-gutter">
           <div className="col-span-12 lg:col-span-4 space-y-4">
-            <div className="h-24 bg-surface-container-low rounded-lg animate-pulse" />
-            <div className="h-24 bg-surface-container-low rounded-lg animate-pulse" />
+            <Skeleton className="h-24" />
+            <Skeleton className="h-24" />
           </div>
           <div className="col-span-12 lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-gutter">
-            <div className="h-48 bg-surface-container-low rounded-xl animate-pulse" />
-            <div className="h-48 bg-surface-container-low rounded-xl animate-pulse" />
+            <Skeleton className="h-48" />
+            <Skeleton className="h-48" />
           </div>
         </div>
       )}
 
       {state.status === "error" && (
-        <div className="bg-surface-container-low border border-outline-variant p-6 rounded space-y-3 max-w-md">
-          <p className="font-sans text-body-sm text-tertiary">{state.message}</p>
-          <button onClick={load} className="font-sans text-label-lg text-primary underline">
-            Try again
-          </button>
+        <div className="max-w-md">
+          <ErrorState description={state.message} onRetry={load} />
         </div>
       )}
 
@@ -74,11 +88,11 @@ export function DashboardPage() {
             </div>
 
             {state.urgentItems.length === 0 && (
-              <div className="p-6 bg-surface-container-low border border-outline-variant rounded-lg">
-                <p className="font-sans text-body-sm text-on-surface-variant">
-                  Nothing urgent right now. New gaps, overdue vendors, and approaching dates will show up here.
-                </p>
-              </div>
+              <EmptyState
+                icon="check_circle"
+                title="Nothing urgent"
+                description="New gaps, overdue vendors, and approaching dates will show up here."
+              />
             )}
 
             {state.urgentItems.map((item) => {
@@ -107,17 +121,22 @@ export function DashboardPage() {
           <section className="col-span-12 lg:col-span-8">
             <div className="flex items-center justify-between mb-6">
               <h3 className="font-serif text-headline-md text-on-surface">Active weddings</h3>
+              <Link to="/events" className="font-sans text-label-lg text-primary underline">
+                View all
+              </Link>
             </div>
 
             {state.events.length === 0 ? (
-              <div className="p-10 bg-surface-container-low border border-outline-variant rounded-xl text-center">
-                <p className="font-sans text-body-md text-on-surface-variant mb-4">
-                  No active weddings yet. Start a new client intake to see it here.
-                </p>
-                <Link to="/intake" className="font-sans text-label-lg text-primary underline">
-                  Start a new intake
-                </Link>
-              </div>
+              <EmptyState
+                icon="celebration"
+                title="No active weddings yet"
+                description="Start a new client intake to see it here."
+                action={
+                  <Link to="/intake" className="font-sans text-label-lg text-primary underline">
+                    Start a new intake
+                  </Link>
+                }
+              />
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {state.events.map((event) => (
@@ -136,70 +155,5 @@ export function DashboardPage() {
         </div>
       )}
     </div>
-  );
-}
-
-function EventCard({ event }: { event: EventSummary }) {
-  const percent = event.progress.total > 0 ? Math.round((event.progress.confirmed / event.progress.total) * 100) : 0;
-  const radius = 20;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (percent / 100) * circumference;
-
-  return (
-    <Link
-      to={`/events/${event.id}`}
-      className="group bg-surface-container-lowest border border-outline-variant p-8 rounded-xl transition-all hover:shadow-xl hover:-translate-y-1"
-    >
-      <div className="flex justify-between items-start mb-6">
-        <div>
-          <h4 className="font-serif text-headline-sm text-on-surface mb-1">
-            {event.coupleNames ?? "Untitled wedding"}
-          </h4>
-          <p className="font-sans text-body-sm text-on-surface-variant">{event.weddingDate ?? "Date not set"}</p>
-        </div>
-        <div className="relative w-12 h-12 flex items-center justify-center">
-          <svg className="w-full h-full -rotate-90">
-            <circle className="text-surface-container" cx="24" cy="24" fill="transparent" r={radius} stroke="currentColor" strokeWidth="4" />
-            <circle
-              className="text-primary"
-              cx="24"
-              cy="24"
-              fill="transparent"
-              r={radius}
-              stroke="currentColor"
-              strokeWidth="4"
-              strokeDasharray={circumference}
-              strokeDashoffset={offset}
-            />
-          </svg>
-          <span className="absolute text-[10px] font-bold text-primary">{percent}%</span>
-        </div>
-      </div>
-
-      <div className="space-y-3 mb-6">
-        <div className="flex items-center justify-between py-2 border-b border-outline-variant/30">
-          <span className="font-sans text-body-sm text-on-surface-variant">Vendors confirmed</span>
-          <span className="font-sans text-label-sm text-secondary">
-            {event.vendorSummary.confirmed} / {event.vendorSummary.total}
-          </span>
-        </div>
-        {event.vendorSummary.needsAttention > 0 && (
-          <div className="flex items-center justify-between py-2 border-b border-outline-variant/30">
-            <span className="font-sans text-body-sm text-on-surface-variant">Need attention</span>
-            <span className="font-sans text-label-sm text-tertiary">{event.vendorSummary.needsAttention}</span>
-          </div>
-        )}
-        {event.lastGapCount > 0 && (
-          <div className="flex items-center justify-between py-2 border-b border-outline-variant/30">
-            <span className="font-sans text-body-sm text-on-surface-variant">Gaps to review</span>
-            <span className="font-sans text-label-sm text-tertiary">{event.lastGapCount}</span>
-          </div>
-        )}
-      </div>
-
-      <span className="font-sans text-label-sm text-on-surface-variant uppercase tracking-widest">
-        {event.tradition === "unspecified" ? "Tradition not confirmed" : event.tradition.replace(/_/g, " ")}
-      </span>
-    </Link>
   );
 }

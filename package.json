@@ -1,0 +1,17 @@
+{
+  "name": "sutradhar",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Root dev-orchestration only — the frontend and backend are deployed as separate services (Netlify / Render) and each has its own package.json.",
+  "scripts": {
+    "install:all": "npm install --prefix backend && npm install --prefix frontend",
+    "dev:all": "concurrently -n web,api -c cyan,magenta \"npm run dev --prefix frontend\" \"npm run dev --prefix backend\"",
+    "dev": "npm run dev --prefix frontend",
+    "server": "npm run dev --prefix backend",
+    "build": "npm run build --prefix frontend",
+    "lint": "npm run lint --prefix frontend && npm run typecheck --prefix backend"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
