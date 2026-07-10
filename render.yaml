@@ -20,7 +20,7 @@
 #   through the Netlify proxy.
 services:
   - type: web
-    name: sutradhar-backend
+    name: sutradhar-mvp-service
     runtime: node
     rootDir: backend
     plan: free
