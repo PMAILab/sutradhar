@@ -7,7 +7,7 @@
 [build]
   base = "frontend"
   command = "npm run build"
-  publish = "frontend/dist"
+  publish = "dist"
 
 # Proxies /api/* to the Render backend server-to-server (Netlify's edge
 # makes the request, not the browser) — so from the browser's perspective
