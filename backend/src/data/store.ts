@@ -170,7 +170,16 @@ const ESCALATION_HOURS = 48;
 
 export type VendorStatus = "not_contacted" | "sent" | "confirmed" | "declined" | "needs_review" | "needs_attention";
 
-export async function computeVendorStatus(vendorId: string): Promise<VendorStatus> {
+// vendorFollowUpsEnabled defaults true so internal callers that don't have
+// a planner profile handy (e.g. the WhatsApp webhook, which looks a vendor
+// up by phone number, not by planner) get the same behavior as before this
+// was gated. Only a caller that actually checked the planner's Settings
+// toggle should pass false.
+export async function computeVendorStatus(
+  vendorId: string,
+  options?: { vendorFollowUpsEnabled?: boolean },
+): Promise<VendorStatus> {
+  const vendorFollowUpsEnabled = options?.vendorFollowUpsEnabled ?? true;
   const history = await getMessagesForVendor(vendorId);
   if (history.length === 0) return "not_contacted";
 
@@ -182,7 +191,11 @@ export async function computeVendorStatus(vendorId: string): Promise<VendorStatu
   }
 
   if (lastOutbound) {
+    // A failed send always needs attention, that's an actual delivery
+    // failure, not the "automatic escalation when a vendor goes
+    // unresponsive" this toggle describes, so it's never gated off.
     if (lastOutbound.deliveryStatus === "failed") return "needs_attention";
+    if (!vendorFollowUpsEnabled) return "sent";
     const hoursSinceSent = (Date.now() - new Date(lastOutbound.timestamp).getTime()) / (1000 * 60 * 60);
     return hoursSinceSent >= ESCALATION_HOURS ? "needs_attention" : "sent";
   }

@@ -12,6 +12,7 @@ import {
   type UpdatableEventDetails,
 } from "../data/eventsStore.js";
 import { getVendorsForEvent, computeVendorStatus, getMessagesForVendor, findVenueManagerVendor } from "../data/store.js";
+import { getPlannerProfile } from "../data/plannersStore.js";
 import { trackEvent } from "../lib/analytics.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 
@@ -20,11 +21,13 @@ eventsRouter.use(requireAuth);
 
 eventsRouter.get("/", async (req, res) => {
   const events = await listEvents(req.plannerId);
+  const profile = await getPlannerProfile(req.plannerId);
+  const vendorFollowUpsEnabled = profile?.vendorFollowUps ?? true;
   const withSummary = await Promise.all(
     events.map(async (event) => {
       const progress = planTaskProgress(event);
       const vendors = await getVendorsForEvent(event.id);
-      const vendorStatuses = await Promise.all(vendors.map((v) => computeVendorStatus(v.id)));
+      const vendorStatuses = await Promise.all(vendors.map((v) => computeVendorStatus(v.id, { vendorFollowUpsEnabled })));
       return {
         id: event.id,
         coupleNames: event.coupleNames,

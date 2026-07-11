@@ -14,6 +14,7 @@ import { MESSAGE_TEMPLATES } from "../data/messageTemplates.js";
 import { sendTemplateMessage, WhatsAppSendError } from "../lib/whatsapp.js";
 import { trackEvent } from "../lib/analytics.js";
 import { requireAuth } from "../middleware/requireAuth.js";
+import { getPlannerProfile } from "../data/plannersStore.js";
 
 export const vendorsRouter = Router();
 vendorsRouter.use(requireAuth);
@@ -21,10 +22,12 @@ vendorsRouter.use(requireAuth);
 vendorsRouter.get("/", async (req, res) => {
   const eventId = typeof req.query.eventId === "string" ? req.query.eventId : undefined;
   const scoped = await listVendorsForPlanner(req.plannerId, eventId);
+  const profile = await getPlannerProfile(req.plannerId);
+  const vendorFollowUpsEnabled = profile?.vendorFollowUps ?? true;
 
   const withStatus = await Promise.all(
     scoped.map(async (vendor) => {
-      const status = await computeVendorStatus(vendor.id);
+      const status = await computeVendorStatus(vendor.id, { vendorFollowUpsEnabled });
       if (status === "needs_attention" && markEscalatedIfNew(vendor.id)) {
         trackEvent("vendor_escalated", { vendorId: vendor.id });
       }
@@ -71,6 +74,16 @@ vendorsRouter.post("/bulk-reminder", async (req, res) => {
   const event = await getEventById(eventId, req.plannerId);
   if (!event) {
     res.status(404).json({ error: "Event not found" });
+    return;
+  }
+
+  const profile = await getPlannerProfile(req.plannerId);
+  if (profile?.whatsappEnabled === false) {
+    res.status(400).json({ error: "WhatsApp integration is turned off in Settings, turn it on to send reminders." });
+    return;
+  }
+  if (profile?.vendorFollowUps === false) {
+    res.status(400).json({ error: "Vendor follow-ups are turned off in Settings, turn them on to send a bulk reminder." });
     return;
   }
 
@@ -140,6 +153,12 @@ vendorsRouter.post("/:id/send", async (req, res) => {
     return;
   }
 
+  const profile = await getPlannerProfile(req.plannerId);
+  if (profile?.whatsappEnabled === false) {
+    res.status(400).json({ error: "WhatsApp integration is turned off in Settings, turn it on to send messages." });
+    return;
+  }
+
   const { templateName, params } = req.body ?? {};
   const templateDef = MESSAGE_TEMPLATES[templateName];
   if (!templateDef) {
@@ -174,7 +193,10 @@ vendorsRouter.post("/:id/send", async (req, res) => {
 
     trackEvent("vendor_message_sent", { vendorId: vendor.id, templateName: templateDef.name });
 
-    res.status(201).json({ message, status: await computeVendorStatus(vendor.id) });
+    res.status(201).json({
+      message,
+      status: await computeVendorStatus(vendor.id, { vendorFollowUpsEnabled: profile?.vendorFollowUps ?? true }),
+    });
   } catch (error) {
     const reason = error instanceof WhatsAppSendError ? error.message : "Could not send that message right now.";
 

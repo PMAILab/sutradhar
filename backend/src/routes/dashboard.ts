@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { listEvents, planTaskProgress } from "../data/eventsStore.js";
 import { getVendorsForEvent, computeVendorStatus } from "../data/store.js";
+import { getPlannerProfile } from "../data/plannersStore.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 
 export const dashboardRouter = Router();
@@ -22,6 +23,8 @@ interface UrgentItem {
  */
 dashboardRouter.get("/", async (req, res) => {
   const events = (await listEvents(req.plannerId)).filter((e) => e.successful === null);
+  const profile = await getPlannerProfile(req.plannerId);
+  const vendorFollowUpsEnabled = profile?.vendorFollowUps ?? true;
   const urgentItems: UrgentItem[] = [];
 
   for (const event of events) {
@@ -29,7 +32,7 @@ dashboardRouter.get("/", async (req, res) => {
     const vendors = await getVendorsForEvent(event.id);
 
     for (const vendor of vendors) {
-      const status = await computeVendorStatus(vendor.id);
+      const status = await computeVendorStatus(vendor.id, { vendorFollowUpsEnabled });
       if (status === "needs_attention") {
         urgentItems.push({
           id: `${event.id}_vendor_${vendor.id}`,
@@ -86,7 +89,7 @@ dashboardRouter.get("/", async (req, res) => {
     events.map(async (event) => {
       const progress = planTaskProgress(event);
       const vendors = await getVendorsForEvent(event.id);
-      const vendorStatuses = await Promise.all(vendors.map((v) => computeVendorStatus(v.id)));
+      const vendorStatuses = await Promise.all(vendors.map((v) => computeVendorStatus(v.id, { vendorFollowUpsEnabled })));
       return {
         id: event.id,
         coupleNames: event.coupleNames,

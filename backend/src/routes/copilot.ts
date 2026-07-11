@@ -4,6 +4,7 @@ import { getOrSet } from "../lib/cache.js";
 import { trackEvent } from "../lib/analytics.js";
 import { getCeremonyDefinition, KNOWLEDGE_BASE_VERSION, type Tradition } from "../data/ceremonyKnowledgeBase.js";
 import { getEventById, setLastGapCount } from "../data/eventsStore.js";
+import { getPlannerProfile } from "../data/plannersStore.js";
 import type { StructuredPlan, Gap } from "../types/plan.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 
@@ -63,6 +64,17 @@ copilotRouter.post("/check-gaps", async (req, res) => {
   const event = await getEventById(eventId, req.plannerId);
   if (!event) {
     res.status(404).json({ error: "Event not found" });
+    return;
+  }
+
+  const profile = await getPlannerProfile(req.plannerId);
+  if (!(profile?.aiInsights ?? false)) {
+    await setLastGapCount(eventId, 0);
+    res.json({
+      gaps: [],
+      knowledgeBaseVersion: KNOWLEDGE_BASE_VERSION,
+      note: "AI insights & tips is turned off in Settings, turn it on to see Completeness Copilot suggestions here.",
+    });
     return;
   }
 
