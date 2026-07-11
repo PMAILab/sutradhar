@@ -124,6 +124,10 @@ async function requestOnce<T>(path: string, options: RequestInit & { timeoutMs?:
     throw new Error(body.error ?? `Request failed with status ${response.status}`);
   }
 
+  // 204 No Content (e.g. DELETE) has no body — .json() would throw on the
+  // empty string.
+  if (response.status === 204) return undefined as T;
+
   return response.json() as Promise<T>;
 }
 
@@ -152,7 +156,7 @@ async function request<T>(path: string, options?: RequestInit & { timeoutMs?: nu
   }
 }
 
-export function parseIntake(rawText: string): Promise<{ event: WeddingEvent }> {
+export function parseIntake(rawText: string): Promise<{ event: WeddingEvent; fallback: boolean }> {
   if (isMockMode()) return Promise.resolve(mock.mockParseIntake(rawText));
   return request("/api/intake/parse", {
     method: "POST",
@@ -168,6 +172,29 @@ export function listEvents(): Promise<{ events: EventSummary[] }> {
 export function getEvent(eventId: string): Promise<{ event: WeddingEvent; venueManagerPhone: string | null }> {
   if (isMockMode()) return Promise.resolve(mock.mockGetEvent(eventId));
   return request(`/api/events/${eventId}`);
+}
+
+export interface UpdatableEventDetails {
+  weddingDate?: string | null;
+  city?: string | null;
+  guestCount?: number | null;
+  venue?: Partial<EventVenue>;
+}
+
+export function updateEventDetails(
+  eventId: string,
+  patch: UpdatableEventDetails,
+): Promise<{ event: WeddingEvent }> {
+  if (isMockMode()) return Promise.resolve(mock.mockUpdateEventDetails(eventId, patch));
+  return request(`/api/events/${eventId}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function deleteEvent(eventId: string): Promise<void> {
+  if (isMockMode()) {
+    mock.mockDeleteEvent(eventId);
+    return Promise.resolve();
+  }
+  return request(`/api/events/${eventId}`, { method: "DELETE" });
 }
 
 export interface ActivityItem extends VendorMessage {

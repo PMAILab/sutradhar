@@ -3,10 +3,13 @@ import {
   listEvents,
   getEventById,
   updateCeremonies,
+  updateEventDetails,
   setDismissedGapIds,
   markEventSuccessful,
   planTaskProgress,
   resolveConflict,
+  deleteEvent,
+  type UpdatableEventDetails,
 } from "../data/eventsStore.js";
 import { getVendorsForEvent, computeVendorStatus, getMessagesForVendor, findVenueManagerVendor } from "../data/store.js";
 import { trackEvent } from "../lib/analytics.js";
@@ -52,6 +55,60 @@ eventsRouter.get("/:id", async (req, res) => {
   }
   const venueManager = await findVenueManagerVendor(event.id);
   res.json({ event, venueManagerPhone: venueManager?.phoneNumber ?? null });
+});
+
+// Manual correction for whatever the intake AI didn't catch (city, guest
+// count, single-venue weddings) — the only write path for those fields
+// besides the initial Gemini parse, since there's no re-run-intake option.
+eventsRouter.patch("/:id", async (req, res) => {
+  const { weddingDate, city, guestCount, venue } = req.body ?? {};
+  const patch: UpdatableEventDetails = {};
+
+  if (weddingDate !== undefined) {
+    if (weddingDate !== null && typeof weddingDate !== "string") {
+      res.status(400).json({ error: "weddingDate must be a string or null" });
+      return;
+    }
+    patch.weddingDate = weddingDate;
+  }
+  if (city !== undefined) {
+    if (city !== null && typeof city !== "string") {
+      res.status(400).json({ error: "city must be a string or null" });
+      return;
+    }
+    patch.city = city;
+  }
+  if (guestCount !== undefined) {
+    if (guestCount !== null && typeof guestCount !== "number") {
+      res.status(400).json({ error: "guestCount must be a number or null" });
+      return;
+    }
+    patch.guestCount = guestCount;
+  }
+  if (venue !== undefined) {
+    if (typeof venue !== "object" || venue === null) {
+      res.status(400).json({ error: "venue must be an object" });
+      return;
+    }
+    patch.venue = venue;
+  }
+
+  const updated = await updateEventDetails(req.params.id, req.plannerId, patch);
+  if (!updated) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+  res.json({ event: updated });
+});
+
+eventsRouter.delete("/:id", async (req, res) => {
+  const deleted = await deleteEvent(req.params.id, req.plannerId);
+  if (!deleted) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+  trackEvent("event_deleted", { eventId: req.params.id });
+  res.status(204).end();
 });
 
 // Activity tab feed: every WhatsApp message across every vendor on this

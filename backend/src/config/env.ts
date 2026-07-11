@@ -14,7 +14,7 @@ export const env = {
   supabaseUrl: optional("SUPABASE_URL"),
   supabaseAnonKey: optional("SUPABASE_ANON_KEY"),
   supabaseServiceRoleKey: optional("SUPABASE_SERVICE_ROLE_KEY"),
-  geminiApiKey: optional("GEMINI_API_KEY"),
+  geminiApiKey: optional("VERTEX_API_KEY"),
   whatsappAccessToken: optional("WHATSAPP_ACCESS_TOKEN"),
   whatsappPhoneNumberId: optional("WHATSAPP_PHONE_NUMBER_ID"),
   whatsappBusinessAccountId: optional("WHATSAPP_BUSINESS_ACCOUNT_ID"),

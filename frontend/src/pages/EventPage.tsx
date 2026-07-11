@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams, Link } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams, useLocation, Link } from "react-router-dom";
 import {
   checkGaps,
   trackAnalyticsEvent,
   getEvent,
+  deleteEvent,
   addTaskToCeremony,
   updateTaskStatus,
   dismissGapApi,
   markEventSuccessful,
   resolveConflict,
+  updateEventDetails,
   type Gap,
   type WeddingEvent,
   type MarkSuccessfulWarning,
@@ -39,6 +41,7 @@ const TABS: { id: EventTab; label: string }[] = [
 export function EventPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [eventState, setEventState] = useState<EventState>({ status: "loading" });
   const [activeCeremonyId, setActiveCeremonyId] = useState<string | null>(null);
@@ -46,6 +49,24 @@ export function EventPage() {
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [successWarning, setSuccessWarning] = useState<MarkSuccessfulWarning | null>(null);
   const [actionError, setActionError] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [detailsForm, setDetailsForm] = useState({
+    weddingDate: "",
+    city: "",
+    guestCount: "",
+    venueName: "",
+    venueAddress: "",
+    venueCapacity: "",
+  });
+  const [savingDetails, setSavingDetails] = useState(false);
+  // Only true right after New Intake's navigate({ state }) — a plain page
+  // load/refresh never carries router state, so this naturally clears
+  // itself without needing to be written back anywhere.
+  const [showFallbackNotice, setShowFallbackNotice] = useState(
+    Boolean((location.state as { introFallback?: boolean } | null)?.introFallback),
+  );
 
   const activeTab: EventTab = (searchParams.get("tab") as EventTab) ?? "plan";
   function setActiveTab(tab: EventTab) {
@@ -194,11 +215,51 @@ export function EventPage() {
     });
   }
 
+  async function handleDelete() {
+    setDeleting(true);
+    await guard(async () => {
+      await deleteEvent(event.id);
+      navigate("/events");
+    });
+    setDeleting(false);
+  }
+
   async function handleResolveConflict(conflictId: string, resolvedValue: string) {
     await guard(async () => {
       const { event: updated } = await resolveConflict(event.id, conflictId, resolvedValue);
       setEventState({ status: "loaded", event: updated, venueManagerPhone });
     });
+  }
+
+  function openEditDetails() {
+    setDetailsForm({
+      weddingDate: event.weddingDate ?? "",
+      city: event.city ?? "",
+      guestCount: typeof event.guestCount === "number" ? String(event.guestCount) : "",
+      venueName: event.venue.name ?? "",
+      venueAddress: event.venue.address ?? "",
+      venueCapacity: typeof event.venue.capacity === "number" ? String(event.venue.capacity) : "",
+    });
+    setEditingDetails(true);
+  }
+
+  async function handleSaveDetails() {
+    setSavingDetails(true);
+    await guard(async () => {
+      const { event: updated } = await updateEventDetails(event.id, {
+        weddingDate: detailsForm.weddingDate.trim() || null,
+        city: detailsForm.city.trim() || null,
+        guestCount: detailsForm.guestCount.trim() ? Number(detailsForm.guestCount) : null,
+        venue: {
+          name: detailsForm.venueName.trim() || null,
+          address: detailsForm.venueAddress.trim() || null,
+          capacity: detailsForm.venueCapacity.trim() ? Number(detailsForm.venueCapacity) : null,
+        },
+      });
+      setEventState({ status: "loaded", event: updated, venueManagerPhone });
+      setEditingDetails(false);
+    });
+    setSavingDetails(false);
   }
 
   function handleViewTask(ceremonyId: string) {
@@ -221,6 +282,12 @@ export function EventPage() {
                 {event.city ? ` · ${event.city}` : ""}
                 {typeof event.guestCount === "number" ? ` · ${event.guestCount} guests` : ""}
               </p>
+              <button
+                onClick={openEditDetails}
+                className="font-sans text-label-sm text-primary hover:underline"
+              >
+                Edit details
+              </button>
               {daysUntilWedding !== null && daysUntilWedding >= 0 && (
                 <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-primary/10 text-primary font-sans text-label-sm uppercase tracking-widest">
                   {daysUntilWedding === 0 ? "Today" : `${daysUntilWedding} days to go`}
@@ -228,18 +295,151 @@ export function EventPage() {
               )}
             </div>
           </div>
-          {event.successful ? (
-            <span className="font-sans text-label-lg text-secondary">Marked successfully completed</span>
-          ) : (
+          <div className="flex items-center gap-3">
+            {event.successful ? (
+              <span className="font-sans text-label-lg text-secondary">Marked successfully completed</span>
+            ) : (
+              <button
+                onClick={handleMarkSuccessful}
+                className="flex items-center gap-2 border border-primary text-primary px-6 py-2.5 rounded font-sans text-label-lg hover:bg-primary/5 transition-all"
+              >
+                <span className="material-symbols-outlined">check_circle</span>
+                Mark as successfully completed
+              </button>
+            )}
             <button
-              onClick={handleMarkSuccessful}
-              className="flex items-center gap-2 border border-primary text-primary px-6 py-2.5 rounded font-sans text-label-lg hover:bg-primary/5 transition-all"
+              onClick={() => setConfirmingDelete(true)}
+              aria-label="Delete this wedding"
+              className="flex items-center justify-center w-10 h-10 border border-outline-variant text-on-surface-variant rounded hover:border-tertiary hover:text-tertiary transition-all"
             >
-              <span className="material-symbols-outlined">check_circle</span>
-              Mark as successfully completed
+              <span className="material-symbols-outlined">delete</span>
             </button>
-          )}
+          </div>
         </div>
+
+        {showFallbackNotice && (
+          <div className="mb-8 flex items-start gap-3 bg-primary/5 border border-primary/30 rounded-lg p-5">
+            <span className="material-symbols-outlined text-primary">info</span>
+            <div className="flex-1">
+              <p className="font-sans text-body-md text-on-surface">
+                AI structuring wasn't available when this brief was pasted in, so it's saved as one task under
+                "Review this brief" instead of split into ceremonies. Add ceremonies and tasks manually below, or
+                start a fresh intake with the same brief to try structuring again.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowFallbackNotice(false)}
+              aria-label="Dismiss"
+              className="text-on-surface-variant hover:text-primary"
+            >
+              <span className="material-symbols-outlined">close</span>
+            </button>
+          </div>
+        )}
+
+        {editingDetails && (
+          <div className="mb-8 bg-surface-container-low border border-outline-variant rounded-lg p-6 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <label className="flex flex-col gap-1">
+                <span className="font-sans text-label-sm text-on-surface-variant uppercase tracking-widest">Wedding date</span>
+                <input
+                  type="date"
+                  value={detailsForm.weddingDate}
+                  onChange={(e) => setDetailsForm((f) => ({ ...f, weddingDate: e.target.value }))}
+                  className="px-3 py-2 bg-surface border border-outline-variant rounded font-sans text-body-md"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-sans text-label-sm text-on-surface-variant uppercase tracking-widest">City</span>
+                <input
+                  type="text"
+                  value={detailsForm.city}
+                  onChange={(e) => setDetailsForm((f) => ({ ...f, city: e.target.value }))}
+                  className="px-3 py-2 bg-surface border border-outline-variant rounded font-sans text-body-md"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-sans text-label-sm text-on-surface-variant uppercase tracking-widest">Guest count</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={detailsForm.guestCount}
+                  onChange={(e) => setDetailsForm((f) => ({ ...f, guestCount: e.target.value }))}
+                  className="px-3 py-2 bg-surface border border-outline-variant rounded font-sans text-body-md"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-sans text-label-sm text-on-surface-variant uppercase tracking-widest">Venue name</span>
+                <input
+                  type="text"
+                  value={detailsForm.venueName}
+                  onChange={(e) => setDetailsForm((f) => ({ ...f, venueName: e.target.value }))}
+                  className="px-3 py-2 bg-surface border border-outline-variant rounded font-sans text-body-md"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-sans text-label-sm text-on-surface-variant uppercase tracking-widest">Venue address</span>
+                <input
+                  type="text"
+                  value={detailsForm.venueAddress}
+                  onChange={(e) => setDetailsForm((f) => ({ ...f, venueAddress: e.target.value }))}
+                  className="px-3 py-2 bg-surface border border-outline-variant rounded font-sans text-body-md"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="font-sans text-label-sm text-on-surface-variant uppercase tracking-widest">Venue capacity</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={detailsForm.venueCapacity}
+                  onChange={(e) => setDetailsForm((f) => ({ ...f, venueCapacity: e.target.value }))}
+                  className="px-3 py-2 bg-surface border border-outline-variant rounded font-sans text-body-md"
+                />
+              </label>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={handleSaveDetails}
+                disabled={savingDetails}
+                className="px-6 py-2.5 bg-primary text-on-primary rounded font-sans text-label-lg hover:opacity-90 disabled:opacity-60"
+              >
+                {savingDetails ? "Saving..." : "Save details"}
+              </button>
+              <button
+                onClick={() => setEditingDetails(false)}
+                disabled={savingDetails}
+                className="px-6 py-2.5 border border-outline rounded font-sans text-label-lg text-on-surface hover:bg-surface-container"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {confirmingDelete && (
+          <div className="mb-8 bg-surface-container-low border border-tertiary rounded-lg p-6 space-y-4">
+            <p className="font-sans text-body-md text-on-surface">
+              Delete {event.coupleNames ?? "this wedding"} for good? Every ceremony, task, vendor, and message on it
+              goes with it, this can't be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="px-6 py-2.5 bg-tertiary text-on-primary rounded font-sans text-label-lg hover:opacity-90 disabled:opacity-60"
+              >
+                {deleting ? "Deleting..." : "Delete wedding"}
+              </button>
+              <button
+                onClick={() => setConfirmingDelete(false)}
+                disabled={deleting}
+                className="px-6 py-2.5 border border-outline rounded font-sans text-label-lg text-on-surface hover:bg-surface-container"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {actionError && (
           <div className="mb-6 flex items-center gap-2 bg-tertiary/5 border border-tertiary/40 rounded-lg p-4">

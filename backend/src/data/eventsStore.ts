@@ -215,6 +215,52 @@ export async function setLastGapCount(eventId: string, count: number): Promise<v
   if (error) throw error;
 }
 
+// planner_id is checked here, not just trusted from the caller, so one
+// planner can never delete another's event by guessing an id. Ceremonies,
+// tasks, vendors, messages, and conflicts all cascade via their FK's "on
+// delete cascade" (schema.sql) — this one delete is enough.
+export async function deleteEvent(eventId: string, plannerId: string): Promise<boolean> {
+  const { error, count } = await getSupabase()
+    .from("events")
+    .delete({ count: "exact" })
+    .eq("id", eventId)
+    .eq("planner_id", plannerId);
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
+export interface UpdatableEventDetails {
+  weddingDate?: string | null;
+  city?: string | null;
+  guestCount?: number | null;
+  venue?: Partial<EventVenue>;
+}
+
+export async function updateEventDetails(
+  eventId: string,
+  plannerId: string,
+  details: UpdatableEventDetails,
+): Promise<WeddingEvent | undefined> {
+  const patch: Record<string, unknown> = {};
+  if ("weddingDate" in details) patch.wedding_date = details.weddingDate;
+  if ("city" in details) patch.city = details.city;
+  if ("guestCount" in details) patch.guest_count = details.guestCount;
+  if (details.venue && "name" in details.venue) patch.venue_name = details.venue.name;
+  if (details.venue && "address" in details.venue) patch.venue_address = details.venue.address;
+  if (details.venue && "capacity" in details.venue) patch.venue_capacity = details.venue.capacity;
+
+  if (Object.keys(patch).length === 0) return getEventById(eventId, plannerId);
+
+  const { error, count } = await getSupabase()
+    .from("events")
+    .update(patch, { count: "exact" })
+    .eq("id", eventId)
+    .eq("planner_id", plannerId);
+  if (error) throw error;
+  if (!count) return undefined;
+  return getEventById(eventId, plannerId);
+}
+
 export async function markEventSuccessful(eventId: string, successful: boolean): Promise<WeddingEvent | undefined> {
   const { error } = await getSupabase()
     .from("events")

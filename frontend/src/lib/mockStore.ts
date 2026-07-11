@@ -490,6 +490,20 @@ export function mockUpdateTaskStatus(eventId: string, taskId: string, ceremonyId
   return { event };
 }
 
+export function mockUpdateEventDetails(
+  eventId: string,
+  patch: { weddingDate?: string | null; city?: string | null; guestCount?: number | null; venue?: Partial<WeddingEvent["venue"]> },
+): { event: WeddingEvent } {
+  const db = loadDb();
+  const event = findEvent(db, eventId);
+  if ("weddingDate" in patch) event.weddingDate = patch.weddingDate ?? null;
+  if ("city" in patch) event.city = patch.city ?? null;
+  if ("guestCount" in patch) event.guestCount = patch.guestCount ?? null;
+  if (patch.venue) event.venue = { ...event.venue, ...patch.venue };
+  saveDb(db);
+  return { event };
+}
+
 export function mockDismissGap(eventId: string, gapId: string): { event: WeddingEvent } {
   const db = loadDb();
   const event = findEvent(db, eventId);
@@ -508,6 +522,15 @@ export function mockResolveConflict(eventId: string, conflictId: string, resolve
   }
   saveDb(db);
   return { event };
+}
+
+export function mockDeleteEvent(eventId: string): void {
+  const db = loadDb();
+  db.events = db.events.filter((e) => e.id !== eventId);
+  const remainingVendorIds = new Set(db.vendors.filter((v) => v.eventId !== eventId).map((v) => v.id));
+  db.vendors = db.vendors.filter((v) => v.eventId !== eventId);
+  db.messages = db.messages.filter((m) => remainingVendorIds.has(m.vendorId));
+  saveDb(db);
 }
 
 export function mockMarkEventSuccessful(eventId: string, successful: boolean, acknowledgeIssues = false): MarkSuccessfulResult {

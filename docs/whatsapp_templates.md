@@ -1,6 +1,8 @@
 # WhatsApp message templates, for Meta submission
 
-Submit these three in Meta Business Manager under WhatsApp Manager, Message Templates. Category UTILITY for all three, since anything that reads as promotional gets rejected. Language English (US).
+Submit these three in Meta Business Manager under WhatsApp Manager, Message Templates. Category UTILITY for all three, since anything that reads as promotional gets rejected.
+
+Language: the backend (`backend/src/data/messageTemplates.ts`) sends these as language code `en` (English), not `en_US` (English (US)) — Meta treats those as distinct languages, and a mismatch fails every send with "(#132001) Template name does not exist in the translation" even though the template shows APPROVED in the dashboard. Submit as English, not English (US). If you do need a different language code, update `messageTemplates.ts` to match, or the send breaks. `GET /{waba_id}/message_templates` is the source of truth for what's actually registered.
 
 ## 1. vendor_confirmation_request
 

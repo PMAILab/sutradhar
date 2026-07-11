@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ApiError } from "@google/genai";
 import { env } from "../config/env.js";
 
 export function isGeminiConfigured(): boolean {
@@ -9,20 +9,29 @@ let client: GoogleGenAI | null = null;
 
 function getClient(): GoogleGenAI {
   if (!env.geminiApiKey) {
-    throw new Error("GEMINI_API_KEY is not set");
+    throw new Error("VERTEX_API_KEY is not set");
   }
   if (!client) {
-    client = new GoogleGenAI({ apiKey: env.geminiApiKey });
+    client = new GoogleGenAI({ apiKey: env.geminiApiKey, vertexai: true });
   }
   return client;
 }
 
-// "-latest" alias, not a pinned version: pinned Gemini model ids get
-// retired from new-user access on a rolling basis (gemini-2.5-flash and
-// gemini-2.5-flash-lite both 404 as of July 2026), the alias stays current.
-const MODEL = "gemini-flash-latest";
+// Vertex AI's publisher-model catalog doesn't carry the "-latest" alias
+// (404s), unlike the Gemini Developer API — pin a real Vertex model id.
+const MODEL = "gemini-2.5-pro";
 
-export async function generateJson<T>(prompt: string): Promise<T> {
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Gemini's own error copy for 503 says "usually temporary... try again
+// later" — retrying once, briefly, before giving up to the caller's
+// fallback turns a lot of these into a normal-looking response instead of
+// a fallback the planner has to notice and work around.
+const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
+
+async function generateOnce<T>(prompt: string): Promise<T> {
   const ai = getClient();
   const response = await ai.models.generateContent({
     model: MODEL,
@@ -41,5 +50,16 @@ export async function generateJson<T>(prompt: string): Promise<T> {
     return JSON.parse(text) as T;
   } catch {
     throw new Error("Gemini returned a response that was not valid JSON");
+  }
+}
+
+export async function generateJson<T>(prompt: string): Promise<T> {
+  try {
+    return await generateOnce<T>(prompt);
+  } catch (error) {
+    const retryable = error instanceof ApiError && RETRYABLE_STATUSES.has(error.status);
+    if (!retryable) throw error;
+    await sleep(2000);
+    return generateOnce<T>(prompt);
   }
 }

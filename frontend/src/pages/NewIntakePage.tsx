@@ -31,9 +31,9 @@ export function NewIntakePage() {
     }, 900);
 
     try {
-      const { event } = await parseIntake(rawText);
+      const { event, fallback } = await parseIntake(rawText);
       clearInterval(stepTimer);
-      navigate(`/events/${event.id}`);
+      navigate(`/events/${event.id}`, { state: { introFallback: fallback } });
     } catch (error) {
       clearInterval(stepTimer);
       setErrorMessage(
@@ -55,7 +55,7 @@ export function NewIntakePage() {
           </div>
           <h2 className="font-serif text-headline-md text-primary">{LOADING_STEPS[loadingStepIndex]}</h2>
           <p className="font-sans text-body-sm text-on-surface-variant">
-            This usually takes a few seconds.
+            This usually takes a few seconds, occasionally up to a minute.
           </p>
         </div>
       </div>

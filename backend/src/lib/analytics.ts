@@ -10,7 +10,8 @@ export type AnalyticsEventName =
   | "vendor_bulk_reminder_sent"
   | "vendor_confirmed"
   | "vendor_escalated"
-  | "event_marked_successful";
+  | "event_marked_successful"
+  | "event_deleted";
 
 /** Best-effort, never blocks or fails the caller. Persists to
  *  sutradhar.analytics_events when Supabase is configured; otherwise logs

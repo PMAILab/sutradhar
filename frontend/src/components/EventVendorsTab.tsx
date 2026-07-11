@@ -336,8 +336,12 @@ export function EventVendorsTab({
               <p className="font-sans text-label-sm uppercase tracking-widest">AI Copilot recommendation</p>
             </div>
             <p className="font-sans text-body-sm leading-relaxed italic">
-              "{needsAttentionVendor.name} hasn't responded in over 48 hours. Based on past messages, a direct
-              follow-up usually gets a faster response than waiting. I've drafted an urgent follow-up below."
+              {needsAttentionVendor.lastMessage?.deliveryStatus === "failed"
+                ? `"The last message to ${needsAttentionVendor.name} failed to send${
+                    needsAttentionVendor.lastMessage.errorReason ? `: ${needsAttentionVendor.lastMessage.errorReason}` : ""
+                  }. Nothing's gone out yet, worth trying again or reaching them another way."`
+                : `"${needsAttentionVendor.name} hasn't responded in over 48 hours. Based on past messages, a direct
+              follow-up usually gets a faster response than waiting. I've drafted an urgent follow-up below."`}
             </p>
             <div className="flex gap-3">
               <button
