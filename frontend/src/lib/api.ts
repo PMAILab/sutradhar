@@ -215,6 +215,14 @@ export function sendBulkReminder(eventId: string): Promise<{ sent: number; faile
   });
 }
 
+export function addCeremony(eventId: string, name: string): Promise<{ event: WeddingEvent }> {
+  if (isMockMode()) return Promise.resolve(mock.mockAddCeremony(eventId, name));
+  return request(`/api/events/${eventId}/ceremonies`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
 export function addTaskToCeremony(
   eventId: string,
   ceremonyId: string,

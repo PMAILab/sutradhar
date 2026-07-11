@@ -5,6 +5,7 @@ import {
   trackAnalyticsEvent,
   getEvent,
   deleteEvent,
+  addCeremony,
   addTaskToCeremony,
   updateTaskStatus,
   dismissGapApi,
@@ -47,6 +48,7 @@ export function EventPage() {
   const [activeCeremonyId, setActiveCeremonyId] = useState<string | null>(null);
   const [gapsState, setGapsState] = useState<GapsState>({ status: "loading" });
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [newCeremonyName, setNewCeremonyName] = useState("");
   const [successWarning, setSuccessWarning] = useState<MarkSuccessfulWarning | null>(null);
   const [actionError, setActionError] = useState("");
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -158,6 +160,17 @@ export function EventPage() {
     { confirmed: 0, total: 0 },
   );
   const planScore = taskTotals.total > 0 ? Math.round((taskTotals.confirmed / taskTotals.total) * 100) : 0;
+
+  async function handleAddCeremony() {
+    if (newCeremonyName.trim().length === 0) return;
+    const name = newCeremonyName.trim();
+    await guard(async () => {
+      const { event: updated } = await addCeremony(event.id, name);
+      setEventState({ status: "loaded", event: updated, venueManagerPhone });
+      setActiveCeremonyId(updated.ceremonies[updated.ceremonies.length - 1]?.id ?? null);
+      setNewCeremonyName("");
+    });
+  }
 
   async function handleAddTask() {
     if (!activeCeremony || newTaskTitle.trim().length === 0) return;
@@ -546,7 +559,7 @@ export function EventPage() {
             </div>
 
             {/* Ceremony tabs */}
-            <div className="flex items-end gap-8 mb-10 border-b border-outline-variant overflow-x-auto">
+            <div className="flex items-end gap-8 mb-3 border-b border-outline-variant overflow-x-auto">
               {event.ceremonies.map((ceremony) => (
                 <button
                   key={ceremony.id}
@@ -560,6 +573,21 @@ export function EventPage() {
                   {ceremony.name}
                 </button>
               ))}
+            </div>
+            <div className="flex items-center gap-2 mb-10">
+              <input
+                className="w-48 px-3 py-2 bg-transparent border border-outline-variant focus:border-primary focus:ring-0 outline-none font-sans text-body-sm rounded-lg"
+                placeholder="New ceremony name"
+                value={newCeremonyName}
+                onChange={(event) => setNewCeremonyName(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && handleAddCeremony()}
+              />
+              <button
+                onClick={handleAddCeremony}
+                className="px-4 py-2 border border-outline font-sans text-label-sm text-on-surface hover:bg-surface-container transition-all rounded-lg"
+              >
+                Add ceremony
+              </button>
             </div>
 
             {activeCeremony && (

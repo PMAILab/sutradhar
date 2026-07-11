@@ -137,6 +137,30 @@ eventsRouter.get("/:id/activity", async (req, res) => {
   res.json({ activity });
 });
 
+eventsRouter.post("/:id/ceremonies", async (req, res) => {
+  const event = await getEventById(req.params.id, req.plannerId);
+  if (!event) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+  const { name } = req.body ?? {};
+  if (typeof name !== "string" || !name.trim()) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+
+  const ceremony = {
+    id: `ceremony_${event.ceremonies.length}_${Date.now()}`,
+    name: name.trim(),
+    notes: null,
+    tasks: [],
+  };
+  event.ceremonies.push(ceremony);
+
+  await updateCeremonies(event.id, event.ceremonies);
+  res.status(201).json({ event });
+});
+
 eventsRouter.post("/:id/tasks", async (req, res) => {
   const event = await getEventById(req.params.id, req.plannerId);
   if (!event) {

@@ -469,6 +469,14 @@ export function mockSendBulkReminder(eventId: string): { sent: number; failed: n
   return { sent, failed: 0 };
 }
 
+export function mockAddCeremony(eventId: string, name: string): { event: WeddingEvent } {
+  const db = loadDb();
+  const event = findEvent(db, eventId);
+  event.ceremonies.push({ id: `ceremony_${Date.now()}`, name, notes: null, tasks: [] });
+  saveDb(db);
+  return { event };
+}
+
 export function mockAddTaskToCeremony(eventId: string, ceremonyId: string, title: string): { event: WeddingEvent } {
   const db = loadDb();
   const event = findEvent(db, eventId);
