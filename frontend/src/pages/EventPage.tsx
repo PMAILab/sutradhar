@@ -655,7 +655,7 @@ export function EventPage() {
                     const pct = total > 0 ? Math.round((confirmed / total) * 100) : 0;
                     return (
                       <div key={c.id} className="flex-1 flex flex-col items-center gap-2" title={`${c.name}: ${pct}%`}>
-                        <div className="w-full bg-surface-container rounded-t flex items-end" style={{ height: "100%" }}>
+                        <div className="w-full h-20 bg-surface-container rounded-t flex items-end">
                           <div
                             className="w-full bg-secondary rounded-t transition-all"
                             style={{ height: `${Math.max(pct, 4)}%` }}
