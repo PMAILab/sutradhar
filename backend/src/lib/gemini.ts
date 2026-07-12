@@ -19,7 +19,11 @@ function getClient(): GoogleGenAI {
 
 // Vertex AI's publisher-model catalog doesn't carry the "-latest" alias
 // (404s), unlike the Gemini Developer API — pin a real Vertex model id.
-const MODEL = "gemini-2.5-pro";
+// gemini-2.5-pro 404s under Vertex AI Express (API-key) mode in some
+// regions (e.g. asia-southeast1) where it isn't GA yet — gemini-2.5-flash
+// has broader regional availability and is fully capable of the
+// structured-JSON tasks this file is used for.
+const MODEL = "gemini-2.5-flash";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
