@@ -172,6 +172,23 @@ eventsRouter.post("/:id/ceremonies", async (req, res) => {
   res.status(201).json({ event });
 });
 
+eventsRouter.delete("/:id/ceremonies/:ceremonyId", async (req, res) => {
+  const event = await getEventById(req.params.id, req.plannerId);
+  if (!event) {
+    res.status(404).json({ error: "Event not found" });
+    return;
+  }
+  const ceremony = event.ceremonies.find((c) => c.id === req.params.ceremonyId);
+  if (!ceremony) {
+    res.status(404).json({ error: "Ceremony not found" });
+    return;
+  }
+
+  event.ceremonies = event.ceremonies.filter((c) => c.id !== req.params.ceremonyId);
+  await updateCeremonies(event.id, event.ceremonies);
+  res.json({ event });
+});
+
 eventsRouter.post("/:id/tasks", async (req, res) => {
   const event = await getEventById(req.params.id, req.plannerId);
   if (!event) {

@@ -6,6 +6,7 @@ import {
   getEvent,
   deleteEvent,
   addCeremony,
+  deleteCeremony,
   addTaskToCeremony,
   updateTaskStatus,
   dismissGapApi,
@@ -169,6 +170,15 @@ export function EventPage() {
       setEventState({ status: "loaded", event: updated, venueManagerPhone });
       setActiveCeremonyId(updated.ceremonies[updated.ceremonies.length - 1]?.id ?? null);
       setNewCeremonyName("");
+    });
+  }
+
+  async function handleDeleteCeremony(ceremonyId: string) {
+    if (!window.confirm("Delete this ceremony and all its tasks?")) return;
+    await guard(async () => {
+      const { event: updated } = await deleteCeremony(event.id, ceremonyId);
+      setEventState({ status: "loaded", event: updated, venueManagerPhone });
+      setActiveCeremonyId((prev) => (prev === ceremonyId ? (updated.ceremonies[0]?.id ?? null) : prev));
     });
   }
 
@@ -561,17 +571,31 @@ export function EventPage() {
             {/* Ceremony tabs */}
             <div className="flex items-end gap-8 mb-3 border-b border-outline-variant overflow-x-auto">
               {event.ceremonies.map((ceremony) => (
-                <button
+                <div
                   key={ceremony.id}
-                  onClick={() => setActiveCeremonyId(ceremony.id)}
-                  className={`pb-4 font-serif text-headline-sm whitespace-nowrap border-b-2 transition-all ${
-                    ceremony.id === activeCeremony?.id
-                      ? "text-primary border-primary font-semibold"
-                      : "text-on-surface-variant border-transparent hover:text-on-surface"
+                  className={`flex items-center gap-1 pb-4 border-b-2 ${
+                    ceremony.id === activeCeremony?.id ? "border-primary" : "border-transparent"
                   }`}
                 >
-                  {ceremony.name}
-                </button>
+                  <button
+                    onClick={() => setActiveCeremonyId(ceremony.id)}
+                    className={`font-serif text-headline-sm whitespace-nowrap transition-all ${
+                      ceremony.id === activeCeremony?.id
+                        ? "text-primary font-semibold"
+                        : "text-on-surface-variant hover:text-on-surface"
+                    }`}
+                  >
+                    {ceremony.name}
+                  </button>
+                  <button
+                    onClick={() => handleDeleteCeremony(ceremony.id)}
+                    title="Delete ceremony"
+                    aria-label={`Delete ${ceremony.name}`}
+                    className="text-on-surface-variant hover:text-tertiary text-label-sm px-1"
+                  >
+                    ✕
+                  </button>
+                </div>
               ))}
             </div>
             <div className="flex items-center gap-2 mb-10">

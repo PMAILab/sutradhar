@@ -226,6 +226,11 @@ export function addCeremony(eventId: string, name: string): Promise<{ event: Wed
   });
 }
 
+export function deleteCeremony(eventId: string, ceremonyId: string): Promise<{ event: WeddingEvent }> {
+  if (isMockMode()) return Promise.resolve(mock.mockDeleteCeremony(eventId, ceremonyId));
+  return request(`/api/events/${eventId}/ceremonies/${ceremonyId}`, { method: "DELETE" });
+}
+
 export function addTaskToCeremony(
   eventId: string,
   ceremonyId: string,

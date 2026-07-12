@@ -477,6 +477,14 @@ export function mockAddCeremony(eventId: string, name: string): { event: Wedding
   return { event };
 }
 
+export function mockDeleteCeremony(eventId: string, ceremonyId: string): { event: WeddingEvent } {
+  const db = loadDb();
+  const event = findEvent(db, eventId);
+  event.ceremonies = event.ceremonies.filter((c) => c.id !== ceremonyId);
+  saveDb(db);
+  return { event };
+}
+
 export function mockAddTaskToCeremony(eventId: string, ceremonyId: string, title: string): { event: WeddingEvent } {
   const db = loadDb();
   const event = findEvent(db, eventId);
