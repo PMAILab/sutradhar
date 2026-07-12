@@ -1,14 +1,13 @@
 import { Router } from "express";
 import {
   addVendor,
-  listVendorsForPlanner,
   getVendorById,
   addMessage,
   getMessagesForVendor,
   computeVendorStatus,
+  getVendorStatusesForPlanner,
   markEscalatedIfNew,
 } from "../data/store.js";
-import type { Vendor } from "../data/store.js";
 import { getEventById } from "../data/eventsStore.js";
 import { MESSAGE_TEMPLATES } from "../data/messageTemplates.js";
 import { sendTemplateMessage, WhatsAppSendError } from "../lib/whatsapp.js";
@@ -21,23 +20,23 @@ vendorsRouter.use(requireAuth);
 
 vendorsRouter.get("/", async (req, res) => {
   const eventId = typeof req.query.eventId === "string" ? req.query.eventId : undefined;
-  const scoped = await listVendorsForPlanner(req.plannerId, eventId);
   const profile = await getPlannerProfile(req.plannerId);
   const vendorFollowUpsEnabled = profile?.vendorFollowUps ?? true;
 
-  const withStatus = await Promise.all(
-    scoped.map(async (vendor) => {
-      const status = await computeVendorStatus(vendor.id, { vendorFollowUpsEnabled });
+  // Vendors and their messages in one nested query instead of one query
+  // per vendor inside computeVendorStatus *plus* a second one here for
+  // lastMessage.
+  const withStatus = (await getVendorStatusesForPlanner(req.plannerId, vendorFollowUpsEnabled, eventId)).map(
+    ({ vendor, status, history }) => {
       if (status === "needs_attention" && markEscalatedIfNew(vendor.id)) {
         trackEvent("vendor_escalated", { vendorId: vendor.id });
       }
-      const history = await getMessagesForVendor(vendor.id);
       return {
         ...vendor,
         status,
         lastMessage: history.at(-1) ?? null,
       };
-    }),
+    },
   );
   res.json({ vendors: withStatus });
 });
@@ -87,15 +86,17 @@ vendorsRouter.post("/bulk-reminder", async (req, res) => {
     return;
   }
 
-  const vendors: Vendor[] = await listVendorsForPlanner(req.plannerId, eventId);
+  // Vendors and their messages in one nested query for the pre-check,
+  // instead of one computeVendorStatus (and one messages query) per vendor
+  // before any sending even starts.
+  const vendors = (await getVendorStatusesForPlanner(req.plannerId, true, eventId))
+    .filter(({ status }) => status !== "confirmed")
+    .map(({ vendor }) => vendor);
   const templateDef = MESSAGE_TEMPLATES.plan_update;
   let sent = 0;
   let failed = 0;
 
   for (const vendor of vendors) {
-    const status = await computeVendorStatus(vendor.id);
-    if (status === "confirmed") continue;
-
     const params = [
       vendor.name,
       event.coupleNames ?? "the couple",

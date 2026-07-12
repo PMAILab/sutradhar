@@ -62,10 +62,3 @@ export function peek<T>(key: string): T | undefined {
 export function cacheSet<T>(key: string, value: T, ttlMs: number): void {
   asyncStore.set(key, { promise: Promise.resolve(value), value, expiresAt: Date.now() + ttlMs });
 }
-
-/** Drops a key outright — for a caller that knows the underlying state just
- *  changed (e.g. a task was added to the ceremony a cached gap-check covers)
- *  and wants the next read to regenerate instead of serving stale data. */
-export function invalidate(key: string): void {
-  asyncStore.delete(key);
-}

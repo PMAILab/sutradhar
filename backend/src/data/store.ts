@@ -108,15 +108,30 @@ export async function getVendorsForEvent(eventId: string): Promise<Vendor[]> {
 }
 
 // Vendors don't carry planner_id directly, only via their event, so this
-// filters through the events join. Used for the unfiltered "all vendors"
-// view, where an eventId isn't already known-and-verified to belong to
-// the caller the way it is when getVendorsForEvent is called internally.
-export async function listVendorsForPlanner(plannerId: string, eventId?: string): Promise<Vendor[]> {
-  let query = getSupabase().from("vendors").select("*, events!inner(planner_id)").eq("events.planner_id", plannerId);
+// filters through the events join (plus messages nested in the same query,
+// 1 round trip total) — the unfiltered "all vendors" view and bulk-reminder,
+// where an eventId isn't already known-and-verified to belong to the caller
+// the way it is when getVendorsForEvent is called internally.
+export async function getVendorStatusesForPlanner(
+  plannerId: string,
+  vendorFollowUpsEnabled: boolean,
+  eventId?: string,
+): Promise<VendorWithStatus[]> {
+  let query = getSupabase()
+    .from("vendors")
+    .select("*, events!inner(planner_id), messages(*)")
+    .eq("events.planner_id", plannerId);
   if (eventId) query = query.eq("event_id", eventId);
   const { data, error } = await query;
   if (error) throw error;
-  return (data ?? []).map(mapVendor);
+
+  return ((data ?? []) as (VendorRow & { messages: MessageRow[] })[]).map((row) => {
+    const vendor = mapVendor(row);
+    const history = (row.messages ?? [])
+      .map(mapMessage)
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return { vendor, status: deriveVendorStatus(history, vendorFollowUpsEnabled), history };
+  });
 }
 
 // Used to resolve a "Call Venue Manager" action on Event Detail without a
@@ -161,6 +176,27 @@ export async function getMessagesForVendor(vendorId: string): Promise<Message[]>
   return (data ?? []).map(mapMessage);
 }
 
+// Single batched query for messages across many vendors, grouped by vendor
+// id — instead of one `messages` query per vendor. Used anywhere a whole
+// event's (or planner's) vendor statuses are computed at once.
+export async function getMessagesForVendors(vendorIds: string[]): Promise<Map<string, Message[]>> {
+  const byVendor = new Map<string, Message[]>();
+  if (vendorIds.length === 0) return byVendor;
+  const { data, error } = await getSupabase()
+    .from("messages")
+    .select()
+    .in("vendor_id", vendorIds)
+    .order("timestamp", { ascending: true });
+  if (error) throw error;
+  for (const row of data ?? []) {
+    const message = mapMessage(row);
+    const existing = byVendor.get(message.vendorId);
+    if (existing) existing.push(message);
+    else byVendor.set(message.vendorId, [message]);
+  }
+  return byVendor;
+}
+
 export async function updateMessageDeliveryStatus(waMessageId: string, status: DeliveryStatus): Promise<void> {
   const { error } = await getSupabase().from("messages").update({ delivery_status: status }).eq("wa_message_id", waMessageId);
   if (error) throw error;
@@ -170,17 +206,11 @@ const ESCALATION_HOURS = 48;
 
 export type VendorStatus = "not_contacted" | "sent" | "confirmed" | "declined" | "needs_review" | "needs_attention";
 
-// vendorFollowUpsEnabled defaults true so internal callers that don't have
-// a planner profile handy (e.g. the WhatsApp webhook, which looks a vendor
-// up by phone number, not by planner) get the same behavior as before this
-// was gated. Only a caller that actually checked the planner's Settings
-// toggle should pass false.
-export async function computeVendorStatus(
-  vendorId: string,
-  options?: { vendorFollowUpsEnabled?: boolean },
-): Promise<VendorStatus> {
-  const vendorFollowUpsEnabled = options?.vendorFollowUpsEnabled ?? true;
-  const history = await getMessagesForVendor(vendorId);
+// Pure — no DB call — so any caller that already has a vendor's message
+// history in hand (batched fetch, webhook payload, etc.) can derive status
+// without re-querying. computeVendorStatus below is the single-vendor
+// convenience wrapper around this for callers that don't have history yet.
+function deriveVendorStatus(history: Message[], vendorFollowUpsEnabled: boolean): VendorStatus {
   if (history.length === 0) return "not_contacted";
 
   const lastInbound = [...history].reverse().find((m) => m.direction === "inbound");
@@ -201,6 +231,69 @@ export async function computeVendorStatus(
   }
 
   return "not_contacted";
+}
+
+// vendorFollowUpsEnabled defaults true so internal callers that don't have
+// a planner profile handy (e.g. the WhatsApp webhook, which looks a vendor
+// up by phone number, not by planner) get the same behavior as before this
+// was gated. Only a caller that actually checked the planner's Settings
+// toggle should pass false.
+export async function computeVendorStatus(
+  vendorId: string,
+  options?: { vendorFollowUpsEnabled?: boolean },
+): Promise<VendorStatus> {
+  const history = await getMessagesForVendor(vendorId);
+  return deriveVendorStatus(history, options?.vendorFollowUpsEnabled ?? true);
+}
+
+export interface VendorWithStatus {
+  vendor: Vendor;
+  status: VendorStatus;
+  history: Message[];
+}
+
+// Computes status for a known list of vendors in exactly 1 query (all their
+// messages, batched) instead of 1 `messages` query per vendor.
+export async function getVendorStatuses(
+  vendors: Vendor[],
+  vendorFollowUpsEnabled: boolean,
+): Promise<VendorWithStatus[]> {
+  const messagesByVendor = await getMessagesForVendors(vendors.map((v) => v.id));
+  return vendors.map((vendor) => {
+    const history = messagesByVendor.get(vendor.id) ?? [];
+    return { vendor, status: deriveVendorStatus(history, vendorFollowUpsEnabled), history };
+  });
+}
+
+// Computes every vendor's status across a whole set of events in exactly 1
+// query — vendors and their messages nested via the same FK-embed
+// PostgREST already uses for events->ceremonies->tasks (see eventsStore.ts)
+// — instead of one `vendors` query per event plus one `messages` query per
+// vendor. This is what the dashboard and events-list summaries are built from.
+export async function getVendorStatusesForEvents(
+  eventIds: string[],
+  vendorFollowUpsEnabled: boolean,
+): Promise<Map<string, VendorWithStatus[]>> {
+  const byEvent = new Map<string, VendorWithStatus[]>();
+  if (eventIds.length === 0) return byEvent;
+
+  const { data, error } = await getSupabase()
+    .from("vendors")
+    .select("*, messages(*)")
+    .in("event_id", eventIds);
+  if (error) throw error;
+
+  for (const row of (data ?? []) as (VendorRow & { messages: MessageRow[] })[]) {
+    const vendor = mapVendor(row);
+    const history = (row.messages ?? [])
+      .map(mapMessage)
+      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    const entry: VendorWithStatus = { vendor, status: deriveVendorStatus(history, vendorFollowUpsEnabled), history };
+    const existing = byEvent.get(vendor.eventId);
+    if (existing) existing.push(entry);
+    else byEvent.set(vendor.eventId, [entry]);
+  }
+  return byEvent;
 }
 
 // In-memory on purpose: only dedupes escalation analytics events within a

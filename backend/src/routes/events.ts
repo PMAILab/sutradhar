@@ -11,7 +11,13 @@ import {
   deleteEvent,
   type UpdatableEventDetails,
 } from "../data/eventsStore.js";
-import { getVendorsForEvent, computeVendorStatus, getMessagesForVendor, findVenueManagerVendor } from "../data/store.js";
+import {
+  getVendorsForEvent,
+  getVendorStatuses,
+  getVendorStatusesForEvents,
+  getMessagesForVendors,
+  findVenueManagerVendor,
+} from "../data/store.js";
 import { getPlannerProfile } from "../data/plannersStore.js";
 import { trackEvent } from "../lib/analytics.js";
 import { requireAuth } from "../middleware/requireAuth.js";
@@ -20,33 +26,38 @@ export const eventsRouter = Router();
 eventsRouter.use(requireAuth);
 
 eventsRouter.get("/", async (req, res) => {
-  const events = await listEvents(req.plannerId);
-  const profile = await getPlannerProfile(req.plannerId);
+  // Independent reads, run concurrently instead of one waiting on the other.
+  const [events, profile] = await Promise.all([listEvents(req.plannerId), getPlannerProfile(req.plannerId)]);
   const vendorFollowUpsEnabled = profile?.vendorFollowUps ?? true;
-  const withSummary = await Promise.all(
-    events.map(async (event) => {
-      const progress = planTaskProgress(event);
-      const vendors = await getVendorsForEvent(event.id);
-      const vendorStatuses = await Promise.all(vendors.map((v) => computeVendorStatus(v.id, { vendorFollowUpsEnabled })));
-      return {
-        id: event.id,
-        coupleNames: event.coupleNames,
-        weddingDate: event.weddingDate,
-        tradition: event.tradition,
-        city: event.city,
-        guestCount: event.guestCount,
-        ceremonyCount: event.ceremonies.length,
-        progress,
-        vendorSummary: {
-          total: vendorStatuses.length,
-          confirmed: vendorStatuses.filter((s) => s === "confirmed").length,
-          needsAttention: vendorStatuses.filter((s) => s === "needs_attention").length,
-        },
-        lastGapCount: event.lastGapCount,
-        successful: event.successful,
-      };
-    }),
+
+  // 2 queries total for every event's vendor statuses (all vendors, then
+  // all their messages, both batched) instead of 1 vendors query per event
+  // plus 1 messages query per vendor.
+  const vendorStatusesByEvent = await getVendorStatusesForEvents(
+    events.map((e) => e.id),
+    vendorFollowUpsEnabled,
   );
+
+  const withSummary = events.map((event) => {
+    const vendorStatuses = vendorStatusesByEvent.get(event.id) ?? [];
+    return {
+      id: event.id,
+      coupleNames: event.coupleNames,
+      weddingDate: event.weddingDate,
+      tradition: event.tradition,
+      city: event.city,
+      guestCount: event.guestCount,
+      ceremonyCount: event.ceremonies.length,
+      progress: planTaskProgress(event),
+      vendorSummary: {
+        total: vendorStatuses.length,
+        confirmed: vendorStatuses.filter(({ status }) => status === "confirmed").length,
+        needsAttention: vendorStatuses.filter(({ status }) => status === "needs_attention").length,
+      },
+      lastGapCount: event.lastGapCount,
+      successful: event.successful,
+    };
+  });
   res.json({ events: withSummary });
 });
 
@@ -125,8 +136,8 @@ eventsRouter.get("/:id/activity", async (req, res) => {
   }
   const vendors = await getVendorsForEvent(event.id);
   const vendorById = new Map(vendors.map((v) => [v.id, v]));
-  const messagesByVendor = await Promise.all(vendors.map((v) => getMessagesForVendor(v.id)));
-  const activity = messagesByVendor
+  const messagesByVendor = await getMessagesForVendors(vendors.map((v) => v.id));
+  const activity = [...messagesByVendor.values()]
     .flat()
     .map((message) => ({
       ...message,
@@ -246,12 +257,10 @@ eventsRouter.post("/:id/mark-successful", async (req, res) => {
 
   if (successful) {
     const vendors = await getVendorsForEvent(event.id);
-    const vendorStatuses = await Promise.all(
-      vendors.map(async (v) => ({
-        ...v,
-        status: await computeVendorStatus(v.id),
-      })),
-    );
+    const vendorStatuses = (await getVendorStatuses(vendors, true)).map(({ vendor, status }) => ({
+      ...vendor,
+      status,
+    }));
     const problemVendors = vendorStatuses.filter((v) => v.status === "needs_attention" || v.status === "declined");
     const unresolvedConflicts = event.conflicts.filter((c) => !c.resolved);
 

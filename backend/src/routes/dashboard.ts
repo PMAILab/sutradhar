@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { listEvents, planTaskProgress } from "../data/eventsStore.js";
-import { getVendorsForEvent, computeVendorStatus } from "../data/store.js";
+import { getVendorStatusesForEvents } from "../data/store.js";
 import { getPlannerProfile } from "../data/plannersStore.js";
 import { requireAuth } from "../middleware/requireAuth.js";
 
@@ -22,17 +22,31 @@ interface UrgentItem {
  * Completeness Copilot gaps last. No learned model, just tiers.
  */
 dashboardRouter.get("/", async (req, res) => {
-  const events = (await listEvents(req.plannerId)).filter((e) => e.successful === null);
-  const profile = await getPlannerProfile(req.plannerId);
+  // Independent reads, run concurrently instead of one waiting on the other.
+  const [allEvents, profile] = await Promise.all([listEvents(req.plannerId), getPlannerProfile(req.plannerId)]);
+  const events = allEvents.filter((e) => e.successful === null);
   const vendorFollowUpsEnabled = profile?.vendorFollowUps ?? true;
+
+  // Vendor statuses for every event fetched in exactly 2 queries total
+  // (all vendors, then all their messages, both batched) — shared between
+  // urgent items and event summaries below. This used to run 2 queries per
+  // event *plus* 1 per vendor, twice over (once in a sequential loop, once
+  // in a Promise.all) — O(events + vendors) round trips instead of O(1).
+  const vendorStatusesByEvent = await getVendorStatusesForEvents(
+    events.map((e) => e.id),
+    vendorFollowUpsEnabled,
+  );
+  const eventsWithVendors = events.map((event) => ({
+    event,
+    vendorStatuses: vendorStatusesByEvent.get(event.id) ?? [],
+  }));
+
   const urgentItems: UrgentItem[] = [];
 
-  for (const event of events) {
+  for (const { event, vendorStatuses } of eventsWithVendors) {
     const coupleNames = event.coupleNames ?? "Untitled wedding";
-    const vendors = await getVendorsForEvent(event.id);
 
-    for (const vendor of vendors) {
-      const status = await computeVendorStatus(vendor.id, { vendorFollowUpsEnabled });
+    for (const { vendor, status } of vendorStatuses) {
       if (status === "needs_attention") {
         urgentItems.push({
           id: `${event.id}_vendor_${vendor.id}`,
@@ -85,28 +99,21 @@ dashboardRouter.get("/", async (req, res) => {
 
   urgentItems.sort((a, b) => a.tier - b.tier);
 
-  const eventSummaries = await Promise.all(
-    events.map(async (event) => {
-      const progress = planTaskProgress(event);
-      const vendors = await getVendorsForEvent(event.id);
-      const vendorStatuses = await Promise.all(vendors.map((v) => computeVendorStatus(v.id, { vendorFollowUpsEnabled })));
-      return {
-        id: event.id,
-        coupleNames: event.coupleNames,
-        weddingDate: event.weddingDate,
-        tradition: event.tradition,
-        city: event.city,
-        guestCount: event.guestCount,
-        progress,
-        vendorSummary: {
-          total: vendorStatuses.length,
-          confirmed: vendorStatuses.filter((s) => s === "confirmed").length,
-          needsAttention: vendorStatuses.filter((s) => s === "needs_attention").length,
-        },
-        lastGapCount: event.lastGapCount,
-      };
-    }),
-  );
+  const eventSummaries = eventsWithVendors.map(({ event, vendorStatuses }) => ({
+    id: event.id,
+    coupleNames: event.coupleNames,
+    weddingDate: event.weddingDate,
+    tradition: event.tradition,
+    city: event.city,
+    guestCount: event.guestCount,
+    progress: planTaskProgress(event),
+    vendorSummary: {
+      total: vendorStatuses.length,
+      confirmed: vendorStatuses.filter(({ status }) => status === "confirmed").length,
+      needsAttention: vendorStatuses.filter(({ status }) => status === "needs_attention").length,
+    },
+    lastGapCount: event.lastGapCount,
+  }));
 
   res.json({
     urgentItems: urgentItems.slice(0, 3),
