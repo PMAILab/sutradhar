@@ -723,6 +723,11 @@ export function EventPage() {
               <div className="space-y-6">
                 {gapsState.gaps.map((gap) => (
                   <div key={gap.id} className="bg-surface-container-low border border-outline-variant p-5 space-y-4">
+                    {gap.source === "ai_suggested" && (
+                      <span className="inline-block px-2 py-0.5 border border-outline text-label-sm font-sans text-on-surface-variant">
+                        AI-suggested, not yet in our reviewed knowledge base
+                      </span>
+                    )}
                     <p className="font-sans text-body-md leading-relaxed">
                       <strong className={gap.severity === "important" ? "text-tertiary" : "text-primary"}>
                         {gap.ceremonyName}:

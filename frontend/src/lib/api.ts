@@ -40,8 +40,6 @@ export interface PlanCeremony {
   notes: string | null;
 }
 
-export type Tradition = "hindu_north_indian" | "muslim_nikah" | "sikh_anand_karaj";
-
 export interface PlanConflict {
   id: string;
   description: string;
@@ -53,7 +51,11 @@ export interface PlanConflict {
 export interface StructuredPlan {
   coupleNames: string | null;
   weddingDate: string | null;
-  tradition: Tradition | "unspecified";
+  // "unspecified", one of the curated traditions the Completeness Copilot
+  // knowledge base covers (e.g. "hindu_north_indian"), or any other
+  // free-text tradition intake detected — Completeness Copilot falls back
+  // to AI-suggested gaps for anything outside the curated set.
+  tradition: string;
   traditionConfidence: "high" | "medium" | "low";
   ceremonies: PlanCeremony[];
   conflicts: PlanConflict[];
@@ -81,7 +83,7 @@ export interface EventSummary {
   id: string;
   coupleNames: string | null;
   weddingDate: string | null;
-  tradition: Tradition | "unspecified";
+  tradition: string;
   city?: string | null;
   guestCount?: number | null;
   progress: { confirmed: number; total: number };
@@ -98,6 +100,7 @@ export interface Gap {
   reason: string;
   severity: "important" | "worth_checking";
   kbVersion: string;
+  source: "knowledge_base" | "ai_suggested";
 }
 
 function sleep(ms: number): Promise<void> {

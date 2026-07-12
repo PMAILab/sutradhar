@@ -11,7 +11,7 @@ const HELP_ITEMS = [
   },
   {
     title: "Plan tab",
-    body: "Each ceremony (Haldi, Mehendi, Sangeet, Wedding, Reception...) has its own task list. The Completeness Copilot panel on the right reads your plan against a religion- and region-tagged ceremony knowledge base and flags what's commonly missing for that tradition, with a plain-language reason attached to each suggestion, not a bare checklist item. Dismiss one and it never resurfaces for this wedding.",
+    body: "Each ceremony (Haldi, Mehendi, Sangeet, Wedding, Reception...) has its own task list. The Completeness Copilot panel on the right reads your plan against a religion- and region-tagged ceremony knowledge base and flags what's commonly missing for that tradition, with a plain-language reason attached to each suggestion, not a bare checklist item. For a ceremony or tradition outside that reviewed knowledge base, Gemini suggests a conservative checklist on the fly instead, clearly labeled AI-suggested so you know to double check it. Dismiss one and it never resurfaces for this wedding.",
   },
   {
     title: "Vendors tab",

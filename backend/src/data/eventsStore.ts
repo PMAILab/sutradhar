@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import type { Tradition } from "../data/ceremonyKnowledgeBase.js";
 import type { StructuredPlan, PlanCeremony } from "../types/plan.js";
 import { getSupabase } from "../lib/supabaseClient.js";
 
@@ -83,7 +82,7 @@ function mapEvent(row: EventRow): WeddingEvent {
     successful: row.successful,
     coupleNames: row.couple_names,
     weddingDate: row.wedding_date,
-    tradition: (row.tradition ?? "unspecified") as Tradition | "unspecified",
+    tradition: row.tradition ?? "unspecified",
     traditionConfidence: (row.tradition_confidence ?? "low") as StructuredPlan["traditionConfidence"],
     city: row.city,
     guestCount: row.guest_count,

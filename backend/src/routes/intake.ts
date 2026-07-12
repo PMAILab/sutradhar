@@ -55,7 +55,7 @@ function buildPrompt(rawText: string): string {
 
 Known ceremony names to use when they match (use these exact names, do not invent new spellings): ${KNOWN_CEREMONY_NAMES.join(", ")}. If a ceremony is mentioned that doesn't match any of these, still include it under its own name.
 
-Identify which wedding tradition this appears to be, choosing exactly one of: "hindu_north_indian", "muslim_nikah", "sikh_anand_karaj", or "unspecified" if the text gives no clear religious or cultural signal. Do not guess a religion from names alone unless the text gives an actual signal (an explicit ceremony name, a explicit mention of religion, etc). If unsure, use "unspecified" and set traditionConfidence to "low".
+Identify which wedding tradition this appears to be. If the text gives a clear religious, regional, or cultural signal (an explicit ceremony name, an explicit mention of religion/region, etc), name it as a short lowercase snake_case id, e.g. "hindu_north_indian", "muslim_nikah", "sikh_anand_karaj", "bengali_hindu", "south_indian_hindu", "christian", "jewish". Use exactly "hindu_north_indian", "muslim_nikah", or "sikh_anand_karaj" when the wedding matches one of those specifically, since those have a deeper, human-reviewed ceremony checklist behind them. Do not guess a religion from names alone unless the text gives an actual signal. If the text gives no clear religious, regional, or cultural signal at all, use "unspecified" and set traditionConfidence to "low".
 
 The brief may come from more than one family member and contain contradictions, two different dates for the same event, two different names for the same vendor role, conflicting instructions about the same thing. When you find a real contradiction, do not silently pick one side. Instead, resolve the plan using your best read of the most likely correct value, but also list the contradiction in "conflicts" so the planner can confirm it themselves. Do not invent a conflict that isn't actually there, only flag a genuine contradiction between two stated facts.
 
@@ -70,7 +70,7 @@ Return strictly valid JSON matching this shape, no markdown, no commentary:
   "city": string or null,
   "guestCount": number or null,
   "venue": { "name": string or null, "address": string or null, "capacity": number or null } or null,
-  "tradition": one of "hindu_north_indian" | "muslim_nikah" | "sikh_anand_karaj" | "unspecified",
+  "tradition": "unspecified", or "hindu_north_indian" | "muslim_nikah" | "sikh_anand_karaj" when it matches one of those, or another short lowercase snake_case tradition id when you have a real signal for something else,
   "traditionConfidence": "high" | "medium" | "low",
   "ceremonies": [
     {
@@ -156,8 +156,13 @@ intakeRouter.post("/parse", async (req, res) => {
           : undefined,
       };
 
-      const validTraditions = ["hindu_north_indian", "muslim_nikah", "sikh_anand_karaj", "unspecified"];
-      const tradition = validTraditions.includes(raw.tradition) ? raw.tradition : "unspecified";
+      // Accept any short snake_case tradition id Gemini names (not just the
+      // 3 curated ones) — Completeness Copilot falls back to AI-suggested
+      // gaps for anything outside the curated knowledge base rather than
+      // requiring intake to force every wedding into one of 3 buckets or
+      // "unspecified". Still guards against a malformed/freeform response.
+      const rawTradition = typeof raw.tradition === "string" ? raw.tradition.trim() : "";
+      const tradition = /^[a-z][a-z0-9_]{2,40}$/.test(rawTradition) ? rawTradition : "unspecified";
       const traditionConfidence = ["high", "medium", "low"].includes(raw.traditionConfidence)
         ? raw.traditionConfidence
         : "low";
@@ -165,7 +170,7 @@ intakeRouter.post("/parse", async (req, res) => {
       structuredPlan = {
         coupleNames: raw.coupleNames ?? null,
         weddingDate: raw.weddingDate ?? null,
-        tradition: tradition as StructuredPlan["tradition"],
+        tradition,
         traditionConfidence: traditionConfidence as StructuredPlan["traditionConfidence"],
         ceremonies: (raw.ceremonies ?? []).map((ceremony) => ({
           id: randomUUID(),
